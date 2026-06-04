@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+dist
+coverage
+.tmp
+.secrets
+.env
+.env*.local
+*.tsbuildinfo
+firebase-debug*.log
+.DS_Store

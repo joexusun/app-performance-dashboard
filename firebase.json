@@ -1,0 +1,18 @@
+{
+  "apphosting": [
+    {
+      "backendId": "dashboard",
+      "rootDir": ".",
+      "ignore": [
+        "node_modules",
+        ".git",
+        ".next",
+        ".env",
+        ".env.*",
+        ".tmp",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    }
+  ]
+}
