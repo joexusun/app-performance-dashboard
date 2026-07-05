@@ -596,3 +596,10 @@ h3 {
   font-size: 0.8rem;
   opacity: 0.6;
 }
+/* Buttons inside the messages panel: keep labels on one line with real padding,
+   without touching .iconButton elsewhere in the dashboard. */
+.messagesPanel .iconButton {
+  padding: 6px 14px;
+  white-space: nowrap;
+  line-height: 1.2;
+}

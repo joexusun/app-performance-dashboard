@@ -59,7 +59,8 @@ export async function listFeedback(): Promise<FeedbackItem[] | null> {
       osVersion: data.osVersion != null ? String(data.osVersion) : null,
       status: data.status === "replied" || data.status === "closed" ? data.status : "new",
       createdAt: createdAt ? createdAt.toISOString() : null,
-      attachmentUrl
+      attachmentUrl,
+      attachmentName: attachmentPath ? attachmentPath.split("/").pop() ?? null : null
     });
   }
   return items;

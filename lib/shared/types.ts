@@ -157,4 +157,5 @@ export type FeedbackItem = {
   status: FeedbackStatus;
   createdAt: string | null;
   attachmentUrl: string | null;
+  attachmentName: string | null;
 };

@@ -137,7 +137,7 @@ export default function ReceiptMessages() {
             <p className="messageBody">{item.message}</p>
             {item.attachmentUrl ? (
               <a href={item.attachmentUrl} target="_blank" rel="noreferrer" className="messageAttachment">
-                View attachment
+                View {item.attachmentName ?? "attachment"}
               </a>
             ) : null}
             <div className="messageActions actions">
