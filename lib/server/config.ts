@@ -60,6 +60,9 @@ export type AppConfig = {
   downloadsSource: "app-store" | "firestore-users";
   monthlyPriceUsd: number | null;
   annualPriceUsd: number | null;
+  // Optional per-product overrides ("id:price,id:price"). Takes precedence over
+  // the term prices above — needed when grandfathered products renew at old prices.
+  productPricesUsd: Record<string, number>;
   firebase: FirebaseCredentials | null;
   mapping: FirestoreMapping;
   productSales: ProductSalesConfig[];
@@ -109,6 +112,18 @@ function readCsv(name: string): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function readProductPrices(name: string): Record<string, number> {
+  const prices: Record<string, number> = {};
+  for (const pair of readCsv(name)) {
+    const index = pair.lastIndexOf(":");
+    if (index <= 0) continue;
+    const productId = pair.slice(0, index).trim();
+    const price = Number(pair.slice(index + 1).trim());
+    if (productId && Number.isFinite(price)) prices[productId] = price;
+  }
+  return prices;
 }
 
 function readBooleanish(name: string, fallback: string | boolean): string | boolean {
@@ -207,6 +222,7 @@ function app(prefix: string, key: AppKey, displayName: string): AppConfig {
     downloadsSource: downloadsSource === "app-store" || downloadsSource === "firestore-users" ? downloadsSource : defaultDownloadsSource,
     monthlyPriceUsd: readNumber(`${prefix}_MONTHLY_PRICE_USD`),
     annualPriceUsd: readNumber(`${prefix}_ANNUAL_PRICE_USD`),
+    productPricesUsd: readProductPrices(`${prefix}_PRODUCT_PRICES_USD`),
     firebase: readFirebase(prefix),
     mapping: {
       users: {

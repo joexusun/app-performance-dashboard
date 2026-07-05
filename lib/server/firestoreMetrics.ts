@@ -169,6 +169,8 @@ async function countSubscriptions(db: Firestore, app: AppConfig): Promise<{ mont
 }
 
 function subscriptionProductPrice(app: AppConfig, productId: string): number {
+  const override = app.productPricesUsd[productId];
+  if (override !== undefined) return override;
   if (app.mapping.entitlements.monthlyProductIds.includes(productId)) {
     return app.monthlyPriceUsd ?? 0;
   }
