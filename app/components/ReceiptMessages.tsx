@@ -129,6 +129,16 @@ export default function ReceiptMessages() {
               <span className={item.isPro ? "messageTag pro" : "messageTag"}>
                 {item.isPro ? "Subscriber" : item.isAnonymousUser ? "Anonymous" : "Free"}
               </span>
+              {item.uid ? (
+                <button
+                  type="button"
+                  className="messageTag messageUid"
+                  title={`Click to copy full UID: ${item.uid}`}
+                  onClick={() => void navigator.clipboard?.writeText(item.uid)}
+                >
+                  {item.uid.slice(0, 8)}…
+                </button>
+              ) : null}
               {item.appVersion ? <span className="messageTag">v{item.appVersion}</span> : null}
               {item.osVersion ? <span className="messageTag">iOS {item.osVersion}</span> : null}
               <span className="messageDate">{formatDate(item.createdAt)}</span>

@@ -596,6 +596,11 @@ h3 {
   font-size: 0.8rem;
   opacity: 0.6;
 }
+.messageUid {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: none;
+  cursor: pointer;
+}
 /* Buttons inside the messages panel: keep labels on one line with real padding,
    without touching .iconButton elsewhere in the dashboard. */
 .messagesPanel .iconButton {
