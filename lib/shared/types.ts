@@ -141,3 +141,20 @@ export const EMPTY_VALUES: MetricValues = {
   },
   dailyMetrics: []
 };
+
+export type FeedbackStatus = "new" | "replied" | "closed";
+
+export type FeedbackItem = {
+  id: string;
+  uid: string;
+  type: "bug" | "idea" | "question";
+  message: string;
+  contactEmail: string | null;
+  isAnonymousUser: boolean;
+  isPro: boolean;
+  appVersion: string | null;
+  osVersion: string | null;
+  status: FeedbackStatus;
+  createdAt: string | null;
+  attachmentUrl: string | null;
+};

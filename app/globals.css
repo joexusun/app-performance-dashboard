@@ -492,3 +492,107 @@ h3 {
   }
 
 }
+
+/* ── Receipt Cam Messages inbox ─────────────────────────────────────────── */
+.messagesPanel {
+  margin-top: 24px;
+  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  padding-top: 16px;
+}
+.messagesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.messagesHeader h3 {
+  margin: 0;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.messagesBadge {
+  background: #2563eb;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+.messagesEmpty {
+  opacity: 0.7;
+  font-size: 0.9rem;
+}
+.messagesList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.messageCard {
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.messageCard.status-closed {
+  opacity: 0.55;
+}
+.messageMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  margin-bottom: 8px;
+}
+.messageType {
+  font-weight: 600;
+}
+.messageTag {
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+  border-radius: 999px;
+  padding: 1px 8px;
+  opacity: 0.85;
+}
+.messageTag.pro {
+  border-color: #2563eb;
+  color: #2563eb;
+  opacity: 1;
+}
+.messageDate {
+  opacity: 0.6;
+  margin-left: auto;
+}
+.messageStatus {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.messageStatus.new { color: #16a34a; }
+.messageStatus.replied { color: #2563eb; }
+.messageStatus.closed { opacity: 0.6; }
+.messageBody {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.messageAttachment {
+  display: inline-block;
+  font-size: 0.85rem;
+  margin-bottom: 8px;
+}
+.messageActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.messageNoEmail {
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
