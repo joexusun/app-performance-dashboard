@@ -133,10 +133,10 @@ export default function ReceiptMessages() {
                 <button
                   type="button"
                   className="messageTag messageUid"
-                  title={`Click to copy full UID: ${item.uid}`}
+                  title="Click to copy UID"
                   onClick={() => void navigator.clipboard?.writeText(item.uid)}
                 >
-                  {item.uid.slice(0, 8)}…
+                  {item.uid}
                 </button>
               ) : null}
               {item.appVersion ? <span className="messageTag">v{item.appVersion}</span> : null}
