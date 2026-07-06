@@ -601,10 +601,15 @@ h3 {
   background: none;
   cursor: pointer;
 }
-/* Buttons inside the messages panel: keep labels on one line with real padding,
-   without touching .iconButton elsewhere in the dashboard. */
+/* Buttons inside the messages panel: these carry text labels, but the shared
+   .iconButton.ghost variant is a fixed 42px icon-only square (width: 42px,
+   padding: 0) which clips text. Un-fix the width for text buttons here only —
+   .iconButton elsewhere in the dashboard is untouched. */
 .messagesPanel .iconButton {
-  padding: 6px 14px;
   white-space: nowrap;
   line-height: 1.2;
+}
+.messagesPanel .iconButton.ghost {
+  width: auto;
+  padding: 0 14px;
 }
