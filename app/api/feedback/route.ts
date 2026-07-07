@@ -1,17 +1,24 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/server/auth";
-import { listFeedback, updateFeedbackStatus } from "@/lib/server/feedback";
+import { feedbackAppDisplayName, isFeedbackAppKey, listFeedback, updateFeedbackStatus } from "@/lib/server/feedback";
 import type { FeedbackStatus } from "@/lib/shared/types";
 
-export async function GET() {
+const DEFAULT_APP_KEY = "receipt-cam";
+
+export async function GET(request: Request) {
   if (!(await requireAuth())) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  const items = await listFeedback();
+  const appParam = new URL(request.url).searchParams.get("app") ?? DEFAULT_APP_KEY;
+  if (!isFeedbackAppKey(appParam)) {
+    return NextResponse.json({ message: `Unknown app "${appParam}"`, items: [] }, { status: 400 });
+  }
+
+  const items = await listFeedback(appParam);
   if (items === null) {
     return NextResponse.json(
-      { message: "Receipt Cam Firebase credentials are missing.", items: [] },
+      { message: `${feedbackAppDisplayName(appParam)} Firebase credentials are missing.`, items: [] },
       { status: 200 }
     );
   }
@@ -23,18 +30,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { id?: string; status?: FeedbackStatus };
+  let body: { id?: string; status?: FeedbackStatus; app?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ message: "Invalid JSON body" }, { status: 400 });
   }
 
+  const appKey = body.app ?? DEFAULT_APP_KEY;
+  if (!isFeedbackAppKey(appKey)) {
+    return NextResponse.json({ message: `Unknown app "${appKey}"` }, { status: 400 });
+  }
   if (!body.id || !body.status) {
     return NextResponse.json({ message: "id and status are required" }, { status: 400 });
   }
 
-  const ok = await updateFeedbackStatus(body.id, body.status);
+  const ok = await updateFeedbackStatus(appKey, body.id, body.status);
   if (!ok) {
     return NextResponse.json({ message: "Update failed" }, { status: 400 });
   }

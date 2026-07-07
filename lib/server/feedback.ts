@@ -1,24 +1,34 @@
 import { getDb, getAdminApp } from "@/lib/server/firebaseAdmin";
 import { getDashboardConfig } from "@/lib/server/config";
 import { getStorage } from "firebase-admin/storage";
-import type { FeedbackItem, FeedbackStatus } from "@/lib/shared/types";
+import type { AppKey, FeedbackItem, FeedbackStatus } from "@/lib/shared/types";
 
-const FEEDBACK_APP_KEY = "receipt-cam";
+// Apps whose Firestore has (or will have) the shared `feedback` collection schema.
+const FEEDBACK_APP_KEYS: AppKey[] = ["receipt-cam", "savory-advisor"];
 const FEEDBACK_COLLECTION = "feedback";
 const LIST_LIMIT = 200;
 
-function getReceiptCamCredentials() {
+export function isFeedbackAppKey(value: unknown): value is AppKey {
+  return typeof value === "string" && (FEEDBACK_APP_KEYS as string[]).includes(value);
+}
+
+function getFeedbackCredentials(appKey: AppKey) {
   const config = getDashboardConfig();
-  const app = config.apps.find((candidate) => candidate.key === FEEDBACK_APP_KEY);
+  const app = config.apps.find((candidate) => candidate.key === appKey);
   if (!app?.firebase) return null;
   return app.firebase;
 }
 
-export async function listFeedback(): Promise<FeedbackItem[] | null> {
-  const credentials = getReceiptCamCredentials();
+export function feedbackAppDisplayName(appKey: AppKey): string {
+  const config = getDashboardConfig();
+  return config.apps.find((candidate) => candidate.key === appKey)?.displayName ?? appKey;
+}
+
+export async function listFeedback(appKey: AppKey): Promise<FeedbackItem[] | null> {
+  const credentials = getFeedbackCredentials(appKey);
   if (!credentials) return null;
 
-  const db = getDb(`source-${FEEDBACK_APP_KEY}`, credentials);
+  const db = getDb(`source-${appKey}`, credentials);
   const snapshot = await db
     .collection(FEEDBACK_COLLECTION)
     .orderBy("createdAt", "desc")
@@ -34,7 +44,7 @@ export async function listFeedback(): Promise<FeedbackItem[] | null> {
     const attachmentPath = typeof data.attachmentPath === "string" ? data.attachmentPath : null;
     if (attachmentPath) {
       try {
-        const bucket = getStorage(getAdminApp(`source-${FEEDBACK_APP_KEY}`, credentials)).bucket(
+        const bucket = getStorage(getAdminApp(`source-${appKey}`, credentials)).bucket(
           `${credentials.projectId}.firebasestorage.app`
         );
         const [url] = await bucket.file(attachmentPath).getSignedUrl({
@@ -66,12 +76,12 @@ export async function listFeedback(): Promise<FeedbackItem[] | null> {
   return items;
 }
 
-export async function updateFeedbackStatus(id: string, status: FeedbackStatus): Promise<boolean> {
-  const credentials = getReceiptCamCredentials();
+export async function updateFeedbackStatus(appKey: AppKey, id: string, status: FeedbackStatus): Promise<boolean> {
+  const credentials = getFeedbackCredentials(appKey);
   if (!credentials) return false;
   if (!id || !["new", "replied", "closed"].includes(status)) return false;
 
-  const db = getDb(`source-${FEEDBACK_APP_KEY}`, credentials);
+  const db = getDb(`source-${appKey}`, credentials);
   await db.collection(FEEDBACK_COLLECTION).doc(id).update({
     status,
     statusUpdatedAt: new Date()

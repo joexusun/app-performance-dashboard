@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { FeedbackItem, FeedbackStatus } from "@/lib/shared/types";
+import type { AppKey, FeedbackItem, FeedbackStatus } from "@/lib/shared/types";
 
 const dashboardBasePath = (() => {
   const value = process.env.NEXT_PUBLIC_DASHBOARD_BASE_PATH?.trim();
@@ -26,9 +26,9 @@ function formatDate(value: string | null): string {
   }).format(new Date(value));
 }
 
-function replyMailto(item: FeedbackItem): string {
+function replyMailto(item: FeedbackItem, appName: string): string {
   if (!item.contactEmail) return "#";
-  const subject = encodeURIComponent("Re: Your ReceiptCam feedback");
+  const subject = encodeURIComponent(`Re: Your ${appName} feedback`);
   const quoted = item.message
     .split("\n")
     .map((line) => `> ${line}`)
@@ -37,7 +37,7 @@ function replyMailto(item: FeedbackItem): string {
   return `mailto:${item.contactEmail}?subject=${subject}&body=${body}`;
 }
 
-export default function ReceiptMessages() {
+export default function AppMessages({ appKey, appName }: { appKey: AppKey; appName: string }) {
   const [items, setItems] = useState<FeedbackItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -47,7 +47,7 @@ export default function ReceiptMessages() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${dashboardBasePath}/api/feedback`);
+      const response = await fetch(`${dashboardBasePath}/api/feedback?app=${appKey}`);
       if (!response.ok) {
         setError(`Could not load messages (HTTP ${response.status}).`);
         setItems([]);
@@ -62,7 +62,7 @@ export default function ReceiptMessages() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [appKey]);
 
   useEffect(() => {
     void load();
@@ -77,14 +77,14 @@ export default function ReceiptMessages() {
         const response = await fetch(`${dashboardBasePath}/api/feedback`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, status })
+          body: JSON.stringify({ app: appKey, id, status })
         });
         if (!response.ok) void load();
       } catch {
         void load();
       }
     },
-    [load]
+    [appKey, load]
   );
 
   const visible = (items ?? []).filter((item) => (filter === "open" ? item.status !== "closed" : true));
@@ -114,8 +114,8 @@ export default function ReceiptMessages() {
 
       {items !== null && visible.length === 0 && !error ? (
         <p className="messagesEmpty">
-          No messages{filter === "open" ? " open" : ""} yet. The in-app Help &amp; Feedback form ships with
-          version 2.1.1 — messages will appear here once users start writing.
+          No messages{filter === "open" ? " open" : ""} yet. Messages appear here once users write in from
+          {" "}{appName}&apos;s in-app Help &amp; Feedback form.
         </p>
       ) : null}
 
@@ -154,7 +154,7 @@ export default function ReceiptMessages() {
               {item.contactEmail ? (
                 <a
                   className="iconButton"
-                  href={replyMailto(item)}
+                  href={replyMailto(item, appName)}
                   onClick={() => void setStatus(item.id, "replied")}
                 >
                   Reply by email

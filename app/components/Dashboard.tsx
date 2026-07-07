@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { LogOut, RefreshCw, Shield } from "lucide-react";
 import type { ConfirmationResult } from "firebase/auth";
-import ReceiptMessages from "@/app/components/ReceiptMessages";
+import AppMessages from "@/app/components/AppMessages";
 import {
   Bar,
   BarChart,
@@ -499,8 +499,10 @@ function AppPanel({ app }: { app: AppMetrics }) {
 
       {app.appKey === "puzzle-canvas" ? <PuzzleCharts app={app} /> : null}
       {app.appKey === "receipt-cam" ? <ReceiptCharts app={app} /> : null}
-      {app.appKey === "receipt-cam" ? <ReceiptMessages /> : null}
       {app.appKey === "savory-advisor" ? <SavoryCharts app={app} /> : null}
+      {app.appKey === "receipt-cam" || app.appKey === "savory-advisor" ? (
+        <AppMessages appKey={app.appKey} appName={app.displayName} />
+      ) : null}
 
       <div className="windowGrid">
         {windows.map((window) => (
