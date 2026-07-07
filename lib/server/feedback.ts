@@ -4,7 +4,7 @@ import { getStorage } from "firebase-admin/storage";
 import type { AppKey, FeedbackItem, FeedbackStatus } from "@/lib/shared/types";
 
 // Apps whose Firestore has (or will have) the shared `feedback` collection schema.
-const FEEDBACK_APP_KEYS: AppKey[] = ["receipt-cam", "savory-advisor"];
+const FEEDBACK_APP_KEYS: AppKey[] = ["receipt-cam", "savory-advisor", "puzzle-canvas"];
 const FEEDBACK_COLLECTION = "feedback";
 const LIST_LIMIT = 200;
 

@@ -500,9 +500,7 @@ function AppPanel({ app }: { app: AppMetrics }) {
       {app.appKey === "puzzle-canvas" ? <PuzzleCharts app={app} /> : null}
       {app.appKey === "receipt-cam" ? <ReceiptCharts app={app} /> : null}
       {app.appKey === "savory-advisor" ? <SavoryCharts app={app} /> : null}
-      {app.appKey === "receipt-cam" || app.appKey === "savory-advisor" ? (
-        <AppMessages appKey={app.appKey} appName={app.displayName} />
-      ) : null}
+      <AppMessages appKey={app.appKey} appName={app.displayName} />
 
       <div className="windowGrid">
         {windows.map((window) => (
