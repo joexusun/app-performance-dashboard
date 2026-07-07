@@ -38,7 +38,7 @@ const dashboardBasePath = (() => {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 })();
 const LOGIN_CODE_TIMEOUT_MS = 20_000;
-const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const AUTO_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 function apiPath(path: string): string {
   return `${dashboardBasePath}${path}`;

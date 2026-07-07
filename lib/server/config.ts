@@ -96,7 +96,7 @@ export type DashboardConfig = {
 };
 
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
 
 function readEnv(name: string): string | null {
   let value = process.env[name]?.trim();
@@ -279,7 +279,7 @@ export function getDashboardConfig(): DashboardConfig {
   return {
     authSecret: readEnv("AUTH_SECRET") ?? "local-development-secret",
     allowedPhoneNumbers: readCsv("DASHBOARD_ALLOWED_PHONE_NUMBERS"),
-    refreshIntervalMs: TWO_HOURS_MS,
+    refreshIntervalMs: TWELVE_HOURS_MS,
     timezone: DEFAULT_TIMEZONE,
     dashboardFirebase: readFirebase("DASHBOARD"),
     appStore: {
