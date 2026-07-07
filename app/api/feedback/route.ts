@@ -15,7 +15,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: `Unknown app "${appParam}"`, items: [] }, { status: 400 });
   }
 
-  const items = await listFeedback(appParam);
+  let items;
+  try {
+    items = await listFeedback(appParam);
+  } catch {
+    return NextResponse.json(
+      {
+        message: `Could not read ${feedbackAppDisplayName(appParam)} feedback — check the service account's access to the feedback project.`,
+        items: []
+      },
+      { status: 200 }
+    );
+  }
   if (items === null) {
     return NextResponse.json(
       { message: `${feedbackAppDisplayName(appParam)} Firebase credentials are missing.`, items: [] },

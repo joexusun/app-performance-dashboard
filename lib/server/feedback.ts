@@ -15,8 +15,11 @@ export function isFeedbackAppKey(value: unknown): value is AppKey {
 function getFeedbackCredentials(appKey: AppKey) {
   const config = getDashboardConfig();
   const app = config.apps.find((candidate) => candidate.key === appKey);
-  if (!app?.firebase) return null;
-  return app.firebase;
+  const credentials = app?.feedbackFirebase ?? app?.firebase ?? null;
+  if (!credentials) return null;
+  // Distinct Admin app name per target project, so a feedback override never
+  // reuses the metrics connection to the app's main project (or vice versa).
+  return { credentials, instanceName: `feedback-${appKey}-${credentials.projectId}` };
 }
 
 export function feedbackAppDisplayName(appKey: AppKey): string {
@@ -25,10 +28,11 @@ export function feedbackAppDisplayName(appKey: AppKey): string {
 }
 
 export async function listFeedback(appKey: AppKey): Promise<FeedbackItem[] | null> {
-  const credentials = getFeedbackCredentials(appKey);
-  if (!credentials) return null;
+  const source = getFeedbackCredentials(appKey);
+  if (!source) return null;
+  const { credentials, instanceName } = source;
 
-  const db = getDb(`source-${appKey}`, credentials);
+  const db = getDb(instanceName, credentials);
   const snapshot = await db
     .collection(FEEDBACK_COLLECTION)
     .orderBy("createdAt", "desc")
@@ -44,7 +48,7 @@ export async function listFeedback(appKey: AppKey): Promise<FeedbackItem[] | nul
     const attachmentPath = typeof data.attachmentPath === "string" ? data.attachmentPath : null;
     if (attachmentPath) {
       try {
-        const bucket = getStorage(getAdminApp(`source-${appKey}`, credentials)).bucket(
+        const bucket = getStorage(getAdminApp(instanceName, credentials)).bucket(
           `${credentials.projectId}.firebasestorage.app`
         );
         const [url] = await bucket.file(attachmentPath).getSignedUrl({
@@ -77,11 +81,11 @@ export async function listFeedback(appKey: AppKey): Promise<FeedbackItem[] | nul
 }
 
 export async function updateFeedbackStatus(appKey: AppKey, id: string, status: FeedbackStatus): Promise<boolean> {
-  const credentials = getFeedbackCredentials(appKey);
-  if (!credentials) return false;
+  const source = getFeedbackCredentials(appKey);
+  if (!source) return false;
   if (!id || !["new", "replied", "closed"].includes(status)) return false;
 
-  const db = getDb(`source-${appKey}`, credentials);
+  const db = getDb(source.instanceName, source.credentials);
   await db.collection(FEEDBACK_COLLECTION).doc(id).update({
     status,
     statusUpdatedAt: new Date()

@@ -66,6 +66,10 @@ export type AppConfig = {
   productPricesUsd: Record<string, number>;
   ga4PropertyId: string | null;
   firebase: FirebaseCredentials | null;
+  // Where the `feedback` collection lives, when not in the main Firebase project
+  // (e.g. Puzzle Canvas feedback ships staging-first). Same service account, so the
+  // SA needs datastore + storage read access granted on the override project.
+  feedbackFirebase: FirebaseCredentials | null;
   mapping: FirestoreMapping;
   productSales: ProductSalesConfig[];
 };
@@ -210,6 +214,8 @@ function productSales(prefix: string, key: AppKey): ProductSalesConfig[] {
 }
 
 function app(prefix: string, key: AppKey, displayName: string): AppConfig {
+  const firebase = readFirebase(prefix);
+  const feedbackProjectId = readEnv(`${prefix}_FEEDBACK_FIREBASE_PROJECT_ID`);
   const downloadsSource = readEnv(`${prefix}_DOWNLOADS_SOURCE`);
   const defaultDownloadsSource =
     key === "puzzle-canvas" || key === "receipt-cam" || key === "savory-advisor" ? "firestore-users" : "app-store";
@@ -226,7 +232,8 @@ function app(prefix: string, key: AppKey, displayName: string): AppConfig {
     annualPriceUsd: readNumber(`${prefix}_ANNUAL_PRICE_USD`),
     productPricesUsd: readProductPrices(`${prefix}_PRODUCT_PRICES_USD`),
     ga4PropertyId: readEnv(`${prefix}_GA4_PROPERTY_ID`),
-    firebase: readFirebase(prefix),
+    firebase,
+    feedbackFirebase: feedbackProjectId && firebase ? { ...firebase, projectId: feedbackProjectId } : null,
     mapping: {
       users: {
         collection: readEnv(`${prefix}_USERS_COLLECTION`),
