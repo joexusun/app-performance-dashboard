@@ -6,6 +6,7 @@ import { getDb } from "@/lib/server/firebaseAdmin";
 import { collectFirestoreMetrics } from "@/lib/server/firestoreMetrics";
 import { fetchFirstTimeDownloads } from "@/lib/server/appStore";
 import { collectAdMobMetrics } from "@/lib/server/adMob";
+import { collectGoogleAnalyticsRetention } from "@/lib/server/googleAnalytics";
 import { mergeValues, readLatestSnapshots, sumMetricValues, writeLatestSnapshot } from "@/lib/server/snapshots";
 
 function cloneEmptyValues() {
@@ -38,6 +39,7 @@ function emptyAppMetrics(app: AppConfig, message: string): AppMetrics {
       firestore: status(false, message),
       appStore: status(false, message),
       ads: status(false, message),
+      analytics: status(false, message),
       snapshot: status(false, "No snapshot available.")
     },
     generatedAt: null,
@@ -67,6 +69,7 @@ async function collectAppMetrics(app: AppConfig): Promise<AppMetrics> {
       ? status(true, "App Store downloads are not used for this app.")
       : status(false, "App Store Connect credentials are missing.");
   let adsStatus = status(false, "AdMob is not configured for this app.");
+  let analyticsStatus = status(false, "Google Analytics is not configured for this app.");
 
   if (app.firebase) {
     try {
@@ -99,6 +102,17 @@ async function collectAppMetrics(app: AppConfig): Promise<AppMetrics> {
     }
   }
 
+  if (app.key === "puzzle-canvas" && app.ga4PropertyId) {
+    try {
+      const analyticsValues = await collectGoogleAnalyticsRetention(app);
+      values.retention = analyticsValues.retention;
+      values.retentionCurve = analyticsValues.retentionCurve;
+      analyticsStatus = status(true, "Google Analytics retention collected.");
+    } catch (error) {
+      analyticsStatus = status(false, error instanceof Error ? error.message : "Google Analytics collection failed.");
+    }
+  }
+
   return {
     appKey: app.key,
     displayName: app.displayName,
@@ -108,6 +122,7 @@ async function collectAppMetrics(app: AppConfig): Promise<AppMetrics> {
       firestore: firestoreStatus,
       appStore: appStoreStatus,
       ads: adsStatus,
+      analytics: analyticsStatus,
       snapshot: status(true, "Snapshot generated.")
     },
     generatedAt: new Date().toISOString(),
@@ -127,6 +142,12 @@ function buildResponse(apps: AppMetrics[], refreshStatus?: SourceStatus): Metric
   };
 }
 
+function orderedAppMetrics(snapshots: AppMetrics[], configApps: AppConfig[]): AppMetrics[] {
+  return configApps.map(
+    (app) => snapshots.find((snapshot) => snapshot.appKey === app.key) ?? emptyAppMetrics(app, "No snapshot for this app.")
+  );
+}
+
 export async function readMetrics(): Promise<MetricsResponse> {
   const config = getDashboardConfig();
   if (!config.dashboardFirebase) {
@@ -141,9 +162,7 @@ export async function readMetrics(): Promise<MetricsResponse> {
       return buildResponse(config.apps.map((app) => emptyAppMetrics(app, "No snapshot has been generated yet.")));
     }
 
-    const ordered = config.apps.map(
-      (app) => snapshots.find((snapshot) => snapshot.appKey === app.key) ?? emptyAppMetrics(app, "No snapshot for this app.")
-    );
+    const ordered = orderedAppMetrics(snapshots, config.apps);
 
     if (isStale(latestUpdatedAt(ordered), config.refreshIntervalMs)) {
       return await refreshMetrics(ordered);
@@ -163,17 +182,30 @@ export async function refreshMetrics(previousApps?: AppMetrics[]): Promise<Refre
     return { ...buildResponse(apps, status(false, "Dashboard Firebase credentials are missing.")), refreshed: false };
   }
 
+  const db = getDb("dashboard", config.dashboardFirebase);
+  let snapshotApps = previousApps;
+  if (!snapshotApps) {
+    try {
+      snapshotApps = orderedAppMetrics(await readLatestSnapshots(db), config.apps);
+    } catch {
+      snapshotApps = undefined;
+    }
+  }
+
   const collected = await Promise.all(config.apps.map((app) => collectAppMetrics(app)));
   const stableMetrics = collected.map((metric) => {
-    const previous = previousApps?.find((app) => app.appKey === metric.appKey);
+    const previous = snapshotApps?.find((app) => app.appKey === metric.appKey);
     if (!previous) return metric;
 
     const values = mergeValues(metric.values);
     const mergedDailyMetrics = mergeValues({ dailyMetrics: [...previous.values.dailyMetrics, ...metric.values.dailyMetrics] }).dailyMetrics;
+    values.dailyMetrics = mergedDailyMetrics;
     if (!metric.sourceStatuses.firestore.ok) {
       values.users = previous.values.users;
       values.activeUsers = previous.values.activeUsers;
       values.subscriptions = previous.values.subscriptions;
+      values.episodeCompletionStats = previous.values.episodeCompletionStats;
+      values.episodeCompletionDistribution = previous.values.episodeCompletionDistribution;
       values.accumulatedSalesUsd = previous.values.accumulatedSalesUsd;
       values.subscriptionSalesUsd = previous.values.subscriptionSalesUsd;
       values.monthlySubscriptionSalesUsd = previous.values.monthlySubscriptionSalesUsd;
@@ -187,11 +219,26 @@ export async function refreshMetrics(previousApps?: AppMetrics[]): Promise<Refre
       values.adsEcpmUsd = previous.values.adsEcpmUsd;
       values.dailyMetrics = mergedDailyMetrics;
     }
+    const previousRetention = previous.values.retention;
+    const previousRetentionCurve = previous.values.retentionCurve;
+    const hasPreviousRetention =
+      (previousRetention && Object.values(previousRetention).some((value) => value !== null && value !== undefined)) ||
+      previousRetentionCurve?.some((point) => point.percentage !== null && point.percentage !== undefined);
+    const analyticsUnavailable =
+      metric.appKey === "puzzle-canvas" && !metric.sourceStatuses.analytics?.ok && Boolean(hasPreviousRetention);
+    if (analyticsUnavailable) {
+      values.retention = previous.values.retention ?? cloneEmptyValues().retention;
+      values.retentionCurve = previous.values.retentionCurve ?? cloneEmptyValues().retentionCurve;
+    }
     if (!metric.sourceStatuses.appStore.ok) {
       values.downloads = previous.values.downloads;
     }
 
-    const preserved = !metric.sourceStatuses.firestore.ok || !metric.sourceStatuses.appStore.ok || !metric.sourceStatuses.ads?.ok;
+    const preserved =
+      !metric.sourceStatuses.firestore.ok ||
+      !metric.sourceStatuses.appStore.ok ||
+      !metric.sourceStatuses.ads?.ok ||
+      analyticsUnavailable;
     return {
       ...metric,
       values,
@@ -206,17 +253,16 @@ export async function refreshMetrics(previousApps?: AppMetrics[]): Promise<Refre
   });
 
   try {
-    const db = getDb("dashboard", config.dashboardFirebase);
     await writeLatestSnapshot(db, stableMetrics);
+    const persisted = orderedAppMetrics(await readLatestSnapshots(db), config.apps);
+    return { ...buildResponse(persisted, status(true, "Metrics refreshed.")), refreshed: true };
   } catch (error) {
     return {
       ...buildResponse(
-        previousApps ?? stableMetrics,
+        snapshotApps ?? stableMetrics,
         status(false, error instanceof Error ? error.message : "Snapshot write failed.")
       ),
       refreshed: false
     };
   }
-
-  return { ...buildResponse(stableMetrics, status(true, "Metrics refreshed.")), refreshed: true };
 }

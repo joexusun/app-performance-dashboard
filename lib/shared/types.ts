@@ -27,6 +27,18 @@ export type DailyMetricPoint = {
 
 export type DailyMetricValueKey = Exclude<keyof DailyMetricPoint, "date">;
 
+export type RetentionCurvePoint = {
+  day: number;
+  percentage: number | null;
+};
+
+export type EpisodeCompletionDistributionPoint = {
+  label: string;
+  minEpisodes: number;
+  maxEpisodes: number | null;
+  users: number;
+};
+
 export type MetricValues = {
   users: {
     total: number | null;
@@ -39,6 +51,19 @@ export type MetricValues = {
     monthly: number | null;
     annual: number | null;
   };
+  episodeCompletionStats: {
+    median: number | null;
+    p75: number | null;
+    max: number | null;
+  };
+  episodeCompletionDistribution: EpisodeCompletionDistributionPoint[];
+  retention: {
+    d1: number | null;
+    d3: number | null;
+    d7: number | null;
+    d14: number | null;
+  };
+  retentionCurve: RetentionCurvePoint[];
   accumulatedSalesUsd: {
     total: number | null;
   };
@@ -69,6 +94,7 @@ export type AppMetrics = {
     firestore: SourceStatus;
     appStore: SourceStatus;
     ads: SourceStatus;
+    analytics?: SourceStatus;
     snapshot: SourceStatus;
   };
   generatedAt: string | null;
@@ -103,6 +129,19 @@ export const EMPTY_VALUES: MetricValues = {
     monthly: null,
     annual: null
   },
+  episodeCompletionStats: {
+    median: null,
+    p75: null,
+    max: null
+  },
+  episodeCompletionDistribution: [],
+  retention: {
+    d1: null,
+    d3: null,
+    d7: null,
+    d14: null
+  },
+  retentionCurve: Array.from({ length: 31 }, (_, day) => ({ day, percentage: null })),
   accumulatedSalesUsd: {
     total: null
   },

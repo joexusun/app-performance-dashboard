@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 
 const CLIENT_APP_NAME = "dashboard-client";
+let currentVerifier: RecaptchaVerifier | null = null;
 
 function requiredEnv(name: string, value: string | undefined): string {
   if (!value) {
@@ -37,6 +38,12 @@ function dashboardAuth(): Auth {
 export async function sendDashboardLoginCode(phoneNumber: string, containerId: string): Promise<ConfirmationResult> {
   const auth = dashboardAuth();
   await setPersistence(auth, browserLocalPersistence);
-  const verifier = new RecaptchaVerifier(auth, containerId, { size: "normal" });
-  return signInWithPhoneNumber(auth, phoneNumber, verifier);
+  clearDashboardLoginVerifier();
+  currentVerifier = new RecaptchaVerifier(auth, containerId, { size: "normal" });
+  return signInWithPhoneNumber(auth, phoneNumber, currentVerifier);
+}
+
+export function clearDashboardLoginVerifier(): void {
+  currentVerifier?.clear();
+  currentVerifier = null;
 }

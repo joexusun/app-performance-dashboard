@@ -6,7 +6,7 @@ import { getDashboardConfig } from "@/lib/server/config";
 import { getAdminApp } from "@/lib/server/firebaseAdmin";
 
 const COOKIE_NAME = "dashboard_session";
-const MAX_AGE_SECONDS = 60 * 60 * 12;
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 const PHONE_PROVIDER = "phone";
 
 function dashboardBasePath(): string {
@@ -33,13 +33,13 @@ function sessionValue(secret: string): string {
   return `${encoded}.${signature(encoded, secret)}`;
 }
 
-function isValidSession(value: string | undefined, secret: string): boolean {
-  if (!value) return false;
+function sessionAgeMs(value: string | undefined, secret: string): number | null {
+  if (!value) return null;
   const [payload, sig] = value.split(".");
-  if (!payload || !sig) return false;
+  if (!payload || !sig) return null;
   const expected = signature(payload, secret);
-  if (Buffer.byteLength(sig) !== Buffer.byteLength(expected)) return false;
-  if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  if (Buffer.byteLength(sig) !== Buffer.byteLength(expected)) return null;
+  if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
 
   // Enforce expiry server-side; never trust the browser cookie maxAge alone.
   try {
@@ -47,18 +47,31 @@ function isValidSession(value: string | undefined, secret: string): boolean {
       role?: string;
       issuedAt?: number;
     };
-    if (decoded.role !== "admin") return false;
-    if (typeof decoded.issuedAt !== "number") return false;
-    return Date.now() - decoded.issuedAt < MAX_AGE_SECONDS * 1000;
+    if (decoded.role !== "admin") return null;
+    if (typeof decoded.issuedAt !== "number") return null;
+    const ageMs = Date.now() - decoded.issuedAt;
+    return ageMs >= 0 && ageMs < SESSION_MAX_AGE_SECONDS * 1000 ? ageMs : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 export async function requireAuth(): Promise<boolean> {
   const config = getDashboardConfig();
   const cookieStore = await cookies();
-  return isValidSession(cookieStore.get(COOKIE_NAME)?.value, config.authSecret);
+  const cookie = cookieStore.get(COOKIE_NAME)?.value;
+  const ageMs = sessionAgeMs(cookie, config.authSecret);
+  if (ageMs === null || !cookie) return false;
+
+  const remainingSeconds = Math.max(1, SESSION_MAX_AGE_SECONDS - Math.floor(ageMs / 1000));
+  cookieStore.set(COOKIE_NAME, cookie, {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: remainingSeconds,
+    path: sessionCookiePath()
+  });
+  return true;
 }
 
 export async function createSession(): Promise<void> {
@@ -68,7 +81,7 @@ export async function createSession(): Promise<void> {
     httpOnly: true,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
-    maxAge: MAX_AGE_SECONDS,
+    maxAge: SESSION_MAX_AGE_SECONDS,
     path: sessionCookiePath()
   });
 }

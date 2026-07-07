@@ -54,7 +54,7 @@ dashboard.wayfloat.com TXT fah-claim=002-02-92808c76-c604-485c-9976-9a091295cd0b
 _acme-challenge_37zms4qlx63nraqa.dashboard.wayfloat.com CNAME ed104de1-5f12-4f12-b8b4-3d57e5deda20.2.authorize.certificatemanager.goog.
 ```
 
-Phone auth authorized domains include both the default App Hosting host and `dashboard.wayfloat.com`.
+Phone auth authorized domains include both the default App Hosting host and `dashboard.wayfloat.com`. The signed dashboard session lasts one week.
 
 ## Data Model
 
@@ -65,6 +65,8 @@ Metric snapshots are written to the dedicated dashboard Firebase project in per-
 - `receiptCam/dashboard`
 
 Each app stores durable daily chart history in `dailyMetrics/{yyyy-mm-dd}` and refresh audit records in `refreshRuns/{runId}`. The legacy `metricSnapshots/latest/apps` path is still written as a migration fallback.
+
+Snapshots become stale after two hours. An open authenticated dashboard also refreshes automatically every two hours.
 
 The dashboard reads each app's production Firestore project only through the server-side Firebase Admin SDK.
 Puzzle Canvas and Savory Advisor product-specific sales cards use comma-separated product id lists from `.env.local`.

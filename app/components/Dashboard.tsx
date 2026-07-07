@@ -16,7 +16,15 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import type { AppKey, AppMetrics, DailyMetricPoint, MetricsResponse, MetricWindow } from "@/lib/shared/types";
+import type {
+  AppKey,
+  AppMetrics,
+  DailyMetricPoint,
+  EpisodeCompletionDistributionPoint,
+  MetricsResponse,
+  MetricWindow,
+  RetentionCurvePoint
+} from "@/lib/shared/types";
 
 const windows: Array<{ key: MetricWindow; label: string }> = [
   { key: "today", label: "Today" },
@@ -29,6 +37,8 @@ const dashboardBasePath = (() => {
   if (!value || value === "/") return "";
   return value.endsWith("/") ? value.slice(0, -1) : value;
 })();
+const LOGIN_CODE_TIMEOUT_MS = 20_000;
+const AUTO_REFRESH_INTERVAL_MS = 2 * 60 * 60 * 1000;
 
 function apiPath(path: string): string {
   return `${dashboardBasePath}${path}`;
@@ -42,6 +52,11 @@ function numberValue(value: number | null): string {
 function currencyValue(value: number | null): string {
   if (value === null) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+}
+
+function percentValue(value: number | null): string {
+  if (value === null) return "—";
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)}%`;
 }
 
 function dateValue(value: string | null): string {
@@ -96,6 +111,19 @@ function loginErrorMessage(error: unknown, fallback: string): string {
   }
 
   return error instanceof Error ? error.message : fallback;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
@@ -176,7 +204,7 @@ function UsersSubscribersChart({ points }: { points: DailyMetricPoint[] }) {
   const data = chartData(points);
 
   return (
-    <ChartShell title="Users and Subscribers">
+    <ChartShell title="Users, Active Users and Subscribers">
       <div className="chartBox">
         <ResponsiveContainer height="100%" width="100%">
           <LineChart data={data} margin={{ bottom: 0, left: -24, right: 8, top: 8 }}>
@@ -185,28 +213,9 @@ function UsersSubscribersChart({ points }: { points: DailyMetricPoint[] }) {
             <YAxis allowDecimals={false} tickLine={false} width={42} />
             <Tooltip content={<ChartTooltip />} />
             <Line dataKey="users" dot={false} name="Users" stroke="#2364d2" strokeWidth={2.4} type="monotone" />
+            <Line dataKey="activeUsers" dot={false} name="Active Users" stroke="#d26a2e" strokeWidth={2.4} type="monotone" />
             <Line dataKey="subscribers" dot={false} name="Subscribers" stroke="#1b8f4c" strokeWidth={2.4} type="monotone" />
           </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </ChartShell>
-  );
-}
-
-function ActiveUsersChart({ points }: { points: DailyMetricPoint[] }) {
-  const data = chartData(points);
-
-  return (
-    <ChartShell title="Active Users">
-      <div className="chartBox">
-        <ResponsiveContainer height="100%" width="100%">
-          <BarChart data={data} margin={{ bottom: 0, left: -24, right: 8, top: 8 }}>
-            <CartesianGrid stroke="#d9ded9" strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="dateLabel" interval="preserveStartEnd" minTickGap={24} tickLine={false} />
-            <YAxis allowDecimals={false} tickLine={false} width={42} />
-            <Tooltip content={<ChartTooltip />} />
-            <Bar dataKey="activeUsers" fill="#4f83d1" name="Active Users" radius={[3, 3, 0, 0]} />
-          </BarChart>
         </ResponsiveContainer>
       </div>
     </ChartShell>
@@ -241,6 +250,120 @@ function OnboardedUsersChart({ points }: { points: DailyMetricPoint[] }) {
   );
 }
 
+function RetentionTooltip({
+  active,
+  label,
+  payload
+}: {
+  active?: boolean;
+  label?: number | string;
+  payload?: unknown;
+}) {
+  if (!active) return null;
+  const value = tooltipPayload(payload)[0]?.value;
+  const percentage = typeof value === "number" ? value : Number(value);
+
+  return (
+    <div className="chartTooltip">
+      <strong>Day {label}</strong>
+      <div className="chartTooltipRow">
+        <span style={{ color: "#156f75" }}>Retention</span>
+        <b>{Number.isFinite(percentage) ? percentValue(percentage) : "—"}</b>
+      </div>
+    </div>
+  );
+}
+
+function UserRetentionChart({ points }: { points: RetentionCurvePoint[] }) {
+  return (
+    <ChartShell title="User Retention">
+      <div className="chartBox">
+        <ResponsiveContainer height="100%" width="100%">
+          <LineChart data={points} margin={{ bottom: 0, left: -16, right: 8, top: 8 }}>
+            <CartesianGrid stroke="#d9ded9" strokeDasharray="3 3" vertical={false} />
+            <XAxis
+              dataKey="day"
+              domain={[0, 30]}
+              ticks={[0, 5, 10, 15, 20, 25, 30]}
+              tickFormatter={(day: number) => `D${day}`}
+              tickLine={false}
+              type="number"
+            />
+            <YAxis
+              domain={[0, 100]}
+              ticks={[0, 25, 50, 75, 100]}
+              tickFormatter={(value: number) => `${value}%`}
+              tickLine={false}
+              width={48}
+            />
+            <Tooltip content={<RetentionTooltip />} />
+            <Line
+              connectNulls={false}
+              dataKey="percentage"
+              dot={{ r: 2.5 }}
+              name="Retention"
+              stroke="#156f75"
+              strokeWidth={2.4}
+              type="monotone"
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartShell>
+  );
+}
+
+function EpisodeDistributionTooltip({
+  active,
+  label,
+  payload
+}: {
+  active?: boolean;
+  label?: number | string;
+  payload?: unknown;
+}) {
+  if (!active) return null;
+  const value = tooltipPayload(payload)[0]?.value;
+  const users = typeof value === "number" ? value : Number(value);
+
+  return (
+    <div className="chartTooltip">
+      <strong>{label} episodes completed</strong>
+      <div className="chartTooltipRow">
+        <span style={{ color: "#2364d2" }}>Users</span>
+        <b>{Number.isFinite(users) ? numberValue(users) : "—"}</b>
+      </div>
+    </div>
+  );
+}
+
+function EpisodeCompletionDistributionChart({
+  points
+}: {
+  points: EpisodeCompletionDistributionPoint[];
+}) {
+  return (
+    <ChartShell title="Episodes Completed Distribution">
+      <div className="chartBox">
+        <ResponsiveContainer height="100%" width="100%">
+          <BarChart data={points} margin={{ bottom: 0, left: -24, right: 8, top: 8 }}>
+            <CartesianGrid stroke="#d9ded9" strokeDasharray="3 3" vertical={false} />
+            <XAxis
+              dataKey="label"
+              interval="preserveStartEnd"
+              minTickGap={18}
+              tickLine={false}
+            />
+            <YAxis allowDecimals={false} tickLine={false} width={44} />
+            <Tooltip content={<EpisodeDistributionTooltip />} />
+            <Bar dataKey="users" fill="#2364d2" name="Users" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartShell>
+  );
+}
+
 function IapSalesChart({ points }: { points: DailyMetricPoint[] }) {
   const data = chartData(points);
 
@@ -261,11 +384,11 @@ function IapSalesChart({ points }: { points: DailyMetricPoint[] }) {
   );
 }
 
-function AdsEarningsChart({ points }: { points: DailyMetricPoint[] }) {
+function RevenueChart({ points }: { points: DailyMetricPoint[] }) {
   const data = chartData(points);
 
   return (
-    <ChartShell title="Ads Earnings">
+    <ChartShell title="Revenue">
       <div className="chartBox">
         <ResponsiveContainer height="100%" width="100%">
           <BarChart data={data} margin={{ bottom: 0, left: -22, right: 8, top: 8 }}>
@@ -273,7 +396,14 @@ function AdsEarningsChart({ points }: { points: DailyMetricPoint[] }) {
             <XAxis dataKey="dateLabel" interval="preserveStartEnd" minTickGap={24} tickLine={false} />
             <YAxis tickFormatter={(value: number) => `$${value}`} tickLine={false} width={44} />
             <Tooltip content={<ChartTooltip />} />
-            <Bar dataKey="adsEarningsUsd" fill="#7a4fd0" name="Ads Earnings" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="iapSalesUsd" fill="#d28a23" name="IAP Sales" stackId="revenue" />
+            <Bar
+              dataKey="adsEarningsUsd"
+              fill="#7a4fd0"
+              name="Ads Earnings"
+              radius={[3, 3, 0, 0]}
+              stackId="revenue"
+            />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -288,10 +418,10 @@ function PuzzleCharts({ app }: { app: AppMetrics }) {
   return (
     <div className="chartStack">
       <UsersSubscribersChart points={points} />
-      <ActiveUsersChart points={points} />
+      <UserRetentionChart points={app.values.retentionCurve ?? []} />
       <OnboardedUsersChart points={points} />
-      <AdsEarningsChart points={points} />
-      <IapSalesChart points={points} />
+      <EpisodeCompletionDistributionChart points={app.values.episodeCompletionDistribution ?? []} />
+      <RevenueChart points={points} />
     </div>
   );
 }
@@ -303,7 +433,6 @@ function ReceiptCharts({ app }: { app: AppMetrics }) {
   return (
     <div className="chartStack">
       <UsersSubscribersChart points={points} />
-      <ActiveUsersChart points={points} />
       <IapSalesChart points={points} />
     </div>
   );
@@ -316,7 +445,6 @@ function SavoryCharts({ app }: { app: AppMetrics }) {
   return (
     <div className="chartStack">
       <UsersSubscribersChart points={points} />
-      <ActiveUsersChart points={points} />
       <IapSalesChart points={points} />
     </div>
   );
@@ -331,6 +459,7 @@ function AppPanel({ app }: { app: AppMetrics }) {
   const showsSubscriptionTermSales = app.appKey === "receipt-cam" || app.appKey === "savory-advisor";
   const usesAppStore = !app.sourceStatuses.appStore.message.toLowerCase().includes("not used");
   const usesAds = app.sourceStatuses.ads?.ok || app.values.accumulatedAdsEarningsUsd?.total !== null;
+  const usesAnalytics = app.appKey === "puzzle-canvas";
 
   return (
     <article className="appPanel">
@@ -343,6 +472,7 @@ function AppPanel({ app }: { app: AppMetrics }) {
           <StatusPill ok={app.sourceStatuses.firestore.ok} label="Firestore" />
           {usesAppStore ? <StatusPill ok={app.sourceStatuses.appStore.ok} label="App Store" /> : null}
           {usesAds ? <StatusPill ok={Boolean(app.sourceStatuses.ads?.ok)} label="AdMob" /> : null}
+          {usesAnalytics ? <StatusPill ok={Boolean(app.sourceStatuses.analytics?.ok)} label="Analytics" /> : null}
         </div>
       </header>
 
@@ -435,10 +565,18 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
 
     try {
       const { sendDashboardLoginCode } = await import("@/lib/client/firebaseAuth");
-      const nextConfirmation = await sendDashboardLoginCode(phoneNumber, "recaptcha-container");
+      const nextConfirmation = await withTimeout(
+        sendDashboardLoginCode(phoneNumber, "recaptcha-container"),
+        LOGIN_CODE_TIMEOUT_MS,
+        "reCAPTCHA could not connect. Check that localhost is an authorized Firebase Auth domain, then reload and try again."
+      );
       setConfirmation(nextConfirmation);
     } catch (error) {
       setError(loginErrorMessage(error, "Could not send the login code."));
+      const { clearDashboardLoginVerifier } = await import("@/lib/client/firebaseAuth");
+      clearDashboardLoginVerifier();
+      const container = document.getElementById("recaptcha-container");
+      if (container) container.innerHTML = "";
     } finally {
       setLoading(false);
     }
@@ -481,6 +619,8 @@ function Login({ onSuccess }: { onSuccess: () => void }) {
   }
 
   async function changePhoneNumber() {
+    const { clearDashboardLoginVerifier } = await import("@/lib/client/firebaseAuth");
+    clearDashboardLoginVerifier();
     setConfirmation(null);
     setCode("");
     setError("");
@@ -598,6 +738,14 @@ export default function Dashboard() {
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    if (!authenticated) return;
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [authenticated]);
 
   if (!authenticated) {
     return <Login onSuccess={load} />;

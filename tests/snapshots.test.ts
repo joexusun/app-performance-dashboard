@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { AppMetrics } from "@/lib/shared/types";
+import {
+  episodeCompletionValue,
+  episodeCompletionDistribution,
+  isProductionEnvironment,
+  isSandboxEnvironment,
+  summarizeEpisodeCompletions
+} from "@/lib/server/firestoreMetrics";
 import { readLatestSnapshots, sumMetricValues, writeLatestSnapshot } from "@/lib/server/snapshots";
 
 type StoredDoc = Record<string, unknown>;
@@ -133,6 +140,25 @@ function appMetric(values: Partial<AppMetrics["values"]>, appKey: AppMetrics["ap
         monthly: values.subscriptions?.monthly ?? null,
         annual: values.subscriptions?.annual ?? null
       },
+      episodeCompletionStats: {
+        median: values.episodeCompletionStats?.median ?? null,
+        p75: values.episodeCompletionStats?.p75 ?? null,
+        max: values.episodeCompletionStats?.max ?? null
+      },
+      episodeCompletionDistribution:
+        values.episodeCompletionDistribution ?? [],
+      retention: {
+        d1: values.retention?.d1 ?? null,
+        d3: values.retention?.d3 ?? null,
+        d7: values.retention?.d7 ?? null,
+        d14: values.retention?.d14 ?? null
+      },
+      retentionCurve:
+        values.retentionCurve ??
+        Array.from({ length: 31 }, (_, day) => ({
+          day,
+          percentage: null
+        })),
       accumulatedSalesUsd: {
         total: values.accumulatedSalesUsd?.total ?? null
       },
@@ -176,12 +202,56 @@ function appMetric(values: Partial<AppMetrics["values"]>, appKey: AppMetrics["ap
       firestore: { ok: true, message: "ok" },
       appStore: { ok: true, message: "ok" },
       ads: { ok: true, message: "ok" },
+      analytics: { ok: true, message: "ok" },
       snapshot: { ok: true, message: "ok" }
     }
   };
 }
 
 describe("snapshot totals", () => {
+  it("calculates median, 75th percentile, and maximum completed episodes", () => {
+    expect(summarizeEpisodeCompletions([])).toEqual({ median: null, p75: null, max: null });
+    expect(summarizeEpisodeCompletions([9, 2, 5])).toEqual({ median: 5, p75: 7, max: 9 });
+    expect(summarizeEpisodeCompletions([10, 2, 4, 8])).toEqual({ median: 6, p75: 8.5, max: 10 });
+  });
+
+  it("builds an episode-completion frequency histogram with readable tail buckets", () => {
+    const distribution = episodeCompletionDistribution([0, 1, 5, 6, 10, 20, 22, 40, 48, 75, 100, 149, 150, 258]);
+    expect(distribution).toHaveLength(12);
+    expect(distribution[0]).toEqual({ label: "0", minEpisodes: 0, maxEpisodes: 0, users: 1 });
+    expect(distribution[1]).toEqual({ label: "1-5", minEpisodes: 1, maxEpisodes: 5, users: 2 });
+    expect(distribution[2]).toEqual({ label: "6-10", minEpisodes: 6, maxEpisodes: 10, users: 2 });
+    expect(distribution[3]).toEqual({ label: "11-20", minEpisodes: 11, maxEpisodes: 20, users: 1 });
+    expect(distribution[4]).toEqual({ label: "21-30", minEpisodes: 21, maxEpisodes: 30, users: 1 });
+    expect(distribution[5]).toEqual({ label: "31-40", minEpisodes: 31, maxEpisodes: 40, users: 1 });
+    expect(distribution[6]).toEqual({ label: "41-50", minEpisodes: 41, maxEpisodes: 50, users: 1 });
+    expect(distribution[7]).toEqual({ label: "51-100", minEpisodes: 51, maxEpisodes: 100, users: 2 });
+    expect(distribution[8]).toEqual({ label: "101-150", minEpisodes: 101, maxEpisodes: 150, users: 2 });
+    expect(distribution[9]).toEqual({ label: "151-200", minEpisodes: 151, maxEpisodes: 200, users: 0 });
+    expect(distribution[10]).toEqual({ label: "201-250", minEpisodes: 201, maxEpisodes: 250, users: 0 });
+    expect(distribution[11]).toEqual({ label: "251+", minEpisodes: 251, maxEpisodes: null, users: 1 });
+  });
+
+  it("uses only explicit numeric episode totals from schema version 3 or later", () => {
+    expect(episodeCompletionValue(3, 12)).toBe(12);
+    expect(episodeCompletionValue(4, 0)).toBe(0);
+    expect(episodeCompletionValue(2, 12)).toBeNull();
+    expect(episodeCompletionValue("3", 12)).toBeNull();
+    expect(episodeCompletionValue(3, "12")).toBeNull();
+    expect(episodeCompletionValue(3, undefined)).toBeNull();
+  });
+
+  it("recognizes sandbox transaction environments", () => {
+    expect(isSandboxEnvironment("Sandbox")).toBe(true);
+    expect(isSandboxEnvironment("sandbox")).toBe(true);
+    expect(isSandboxEnvironment("Production")).toBe(false);
+    expect(isSandboxEnvironment(undefined)).toBe(false);
+    expect(isProductionEnvironment("Production")).toBe(true);
+    expect(isProductionEnvironment(" production ")).toBe(true);
+    expect(isProductionEnvironment("Sandbox")).toBe(false);
+    expect(isProductionEnvironment(null)).toBe(false);
+  });
+
   it("sums portfolio metric values", () => {
     const totals = sumMetricValues([
       appMetric({
@@ -251,6 +321,7 @@ describe("snapshot totals", () => {
           users: 4,
           subscribers: 1,
           activeUsers: 2,
+          onboardedUsers: 12,
           iapSalesUsd: 5,
           goldPackSalesUsd: 2,
           adsEarningsUsd: 0.5
@@ -264,6 +335,7 @@ describe("snapshot totals", () => {
           users: 5,
           subscribers: 2,
           activeUsers: 3,
+          onboardedUsers: null,
           iapSalesUsd: 7,
           goldPackSalesUsd: null,
           adsEarningsUsd: null
@@ -280,15 +352,29 @@ describe("snapshot totals", () => {
       users: 5,
       subscribers: 2,
       activeUsers: 3,
+      onboardedUsers: 12,
       iapSalesUsd: 7,
       goldPackSalesUsd: 2,
       adsEarningsUsd: 0.5
+    });
+    expect(db.store.get("puzzleCanvas/dashboard")).toMatchObject({
+      summary: {
+        values: {
+          dailyMetrics: [
+            expect.objectContaining({
+              date: "2026-06-01",
+              onboardedUsers: 12
+            })
+          ]
+        }
+      }
     });
 
     const snapshots = await readLatestSnapshots(db as never);
     expect(snapshots[0].values.dailyMetrics[0]).toMatchObject({
       date: "2026-06-01",
       users: 5,
+      onboardedUsers: 12,
       goldPackSalesUsd: 2,
       adsEarningsUsd: 0.5
     });

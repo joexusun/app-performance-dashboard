@@ -81,6 +81,28 @@ function isSandboxUserDoc(app: AppConfig, doc: QueryDocumentSnapshot): boolean {
   return Boolean(sandboxField && sandboxValue !== null && doc.get(sandboxField) === sandboxValue);
 }
 
+export function isAndroidPlatform(...values: unknown[]): boolean {
+  return values.some((value) => typeof value === "string" && value.trim().toLowerCase() === "android");
+}
+
+function isExcludedUserDoc(app: AppConfig, doc: QueryDocumentSnapshot): boolean {
+  if (isSandboxUserDoc(app, doc)) return true;
+  return app.key === "puzzle-canvas" && isAndroidPlatform(doc.get("platform"), doc.get("subscriptionDetails.platform"));
+}
+
+export function isSandboxEnvironment(value: unknown): boolean {
+  return typeof value === "string" && /sandbox/i.test(value);
+}
+
+export function isProductionEnvironment(value: unknown): boolean {
+  return typeof value === "string" && /^production$/i.test(value.trim());
+}
+
+function isExcludedPurchaseDoc(app: AppConfig, doc: QueryDocumentSnapshot): boolean {
+  if (isSandboxEnvironment(doc.get("environment"))) return true;
+  return app.key === "puzzle-canvas" && isAndroidPlatform(doc.get("platform"));
+}
+
 function isOnboardedUserDoc(app: AppConfig, doc: QueryDocumentSnapshot): boolean {
   const { onboardedField, onboardedValue } = app.mapping.users;
   if (!onboardedField) return false;
@@ -122,6 +144,7 @@ async function countActiveUsers(db: Firestore, app: AppConfig, window: WindowRan
 
   const users = new Set<string>();
   snapshot.forEach((doc) => {
+    if (isExcludedUserDoc(app, doc)) return;
     const value = userField === "__docId" ? doc.id : doc.get(userField);
     if (typeof value === "string" && value.trim()) users.add(value);
   });
@@ -130,19 +153,129 @@ async function countActiveUsers(db: Firestore, app: AppConfig, window: WindowRan
 }
 
 async function countTotalUsers(db: Firestore, app: AppConfig): Promise<number | null> {
-  const { collection, sandboxField, sandboxValue } = app.mapping.users;
+  const { collection } = app.mapping.users;
   if (!collection) return null;
 
   const snapshot = await db.collection(collection).get();
   let total = 0;
 
   snapshot.forEach((doc) => {
-    if (!sandboxField || sandboxValue === null || doc.get(sandboxField) !== sandboxValue) {
-      total += 1;
-    }
+    if (!isExcludedUserDoc(app, doc)) total += 1;
   });
 
   return total;
+}
+
+function percentile(sorted: number[], quantile: number): number | null {
+  if (sorted.length === 0) return null;
+  const position = (sorted.length - 1) * quantile;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  const lowerValue = sorted[lower] ?? 0;
+  const upperValue = sorted[upper] ?? lowerValue;
+  return lowerValue + (upperValue - lowerValue) * (position - lower);
+}
+
+export function summarizeEpisodeCompletions(
+  values: number[]
+): { median: number | null; p75: number | null; max: number | null } {
+  if (values.length === 0) return { median: null, p75: null, max: null };
+
+  const sorted = [...values].sort((left, right) => left - right);
+
+  return {
+    median: percentile(sorted, 0.5),
+    p75: percentile(sorted, 0.75),
+    max: sorted.at(-1) ?? null
+  };
+}
+
+export function episodeCompletionDistribution(
+  values: number[]
+): MetricValues["episodeCompletionDistribution"] {
+  const buckets: MetricValues["episodeCompletionDistribution"] = [
+    { label: "0", minEpisodes: 0, maxEpisodes: 0, users: 0 },
+    { label: "1-5", minEpisodes: 1, maxEpisodes: 5, users: 0 },
+    { label: "6-10", minEpisodes: 6, maxEpisodes: 10, users: 0 },
+    { label: "11-20", minEpisodes: 11, maxEpisodes: 20, users: 0 },
+    { label: "21-30", minEpisodes: 21, maxEpisodes: 30, users: 0 },
+    { label: "31-40", minEpisodes: 31, maxEpisodes: 40, users: 0 },
+    { label: "41-50", minEpisodes: 41, maxEpisodes: 50, users: 0 },
+    { label: "51-100", minEpisodes: 51, maxEpisodes: 100, users: 0 }
+  ];
+  const maxEpisodes = values.length > 0 ? Math.max(...values) : 100;
+  let rangeStart = 101;
+
+  while (maxEpisodes > rangeStart + 49) {
+    const rangeEnd = rangeStart + 49;
+    buckets.push({
+      label: `${rangeStart}-${rangeEnd}`,
+      minEpisodes: rangeStart,
+      maxEpisodes: rangeEnd,
+      users: 0
+    });
+    rangeStart += 50;
+  }
+
+  buckets.push({
+    label: `${rangeStart}+`,
+    minEpisodes: rangeStart,
+    maxEpisodes: null,
+    users: 0
+  });
+
+  for (const value of values) {
+    const bucket = buckets.find(
+      (candidate) =>
+        value >= candidate.minEpisodes &&
+        (candidate.maxEpisodes === null || value <= candidate.maxEpisodes)
+    );
+    if (bucket) bucket.users += 1;
+  }
+
+  return buckets;
+}
+
+export function episodeCompletionValue(schemaVersion: unknown, totalEpisodesCompleted: unknown): number | null {
+  if (typeof schemaVersion !== "number" || !Number.isFinite(schemaVersion) || schemaVersion < 3) return null;
+  if (
+    typeof totalEpisodesCompleted !== "number" ||
+    !Number.isFinite(totalEpisodesCompleted) ||
+    totalEpisodesCompleted < 0
+  ) {
+    return null;
+  }
+  return totalEpisodesCompleted;
+}
+
+async function getEpisodeCompletionMetrics(
+  db: Firestore,
+  app: AppConfig
+): Promise<{
+  stats: MetricValues["episodeCompletionStats"];
+  distribution: MetricValues["episodeCompletionDistribution"];
+}> {
+  const { collection, totalEpisodesCompletedField } = app.mapping.users;
+  if (!collection || !totalEpisodesCompletedField) {
+    return {
+      stats: { median: null, p75: null, max: null },
+      distribution: episodeCompletionDistribution([])
+    };
+  }
+
+  const snapshot = await db.collection(collection).get();
+  const episodeTotals: number[] = [];
+
+  snapshot.forEach((doc) => {
+    if (isExcludedUserDoc(app, doc)) return;
+    const value = episodeCompletionValue(doc.get("schemaVersion"), doc.get(totalEpisodesCompletedField));
+    if (value !== null) episodeTotals.push(value);
+  });
+
+  return {
+    stats: summarizeEpisodeCompletions(episodeTotals),
+    distribution: episodeCompletionDistribution(episodeTotals)
+  };
 }
 
 async function countSubscriptions(db: Firestore, app: AppConfig): Promise<{ monthly: number; annual: number }> {
@@ -158,6 +291,7 @@ async function countSubscriptions(db: Firestore, app: AppConfig): Promise<{ mont
   let annual = 0;
 
   snapshot.forEach((doc) => {
+    if (isExcludedUserDoc(app, doc)) return;
     const productId = String(doc.get(productField) ?? "");
     const expiresAt = millisFromValue(doc.get(expiryDateField));
     if (expiresAt !== null && expiresAt <= Date.now()) return;
@@ -178,6 +312,39 @@ function subscriptionProductPrice(app: AppConfig, productId: string): number {
     return app.annualPriceUsd ?? 0;
   }
   return 0;
+}
+
+type PuzzleSubscriptionSale = {
+  millis: number;
+  price: number;
+};
+
+async function collectPuzzleSubscriptionSales(db: Firestore, app: AppConfig): Promise<PuzzleSubscriptionSale[]> {
+  if (app.key !== "puzzle-canvas") return [];
+
+  const collection = app.mapping.users.collection ?? app.mapping.entitlements.collection;
+  const snapshot = await db.collection(collection).get();
+  const sales: PuzzleSubscriptionSale[] = [];
+  const seenTransactions = new Set<string>();
+
+  snapshot.forEach((doc) => {
+    if (isExcludedUserDoc(app, doc)) return;
+
+    const productId = String(doc.get(app.mapping.entitlements.productField) ?? "");
+    const price = subscriptionProductPrice(app, productId);
+    if (price <= 0) return;
+
+    const purchaseValue = doc.get(app.mapping.entitlements.originalPurchaseDateField);
+    const millis = millisFromValue(purchaseValue);
+    if (millis === null) return;
+
+    const transactionId = String(doc.get("subscriptionDetails.originalTransactionId") ?? doc.id);
+    if (seenTransactions.has(transactionId)) return;
+    seenTransactions.add(transactionId);
+    sales.push({ millis, price });
+  });
+
+  return sales;
 }
 
 async function sumReceiptCamAccumulatedSalesRevenue(db: Firestore, app: AppConfig): Promise<number> {
@@ -281,6 +448,20 @@ function savoryProductKind(app: AppConfig, productId: string): "monthly" | "annu
 }
 
 async function collectSavorySaleRecords(db: Firestore, app: AppConfig): Promise<SavorySaleRecord[]> {
+  const userEnvironment = new Map<string, unknown>();
+  const userSnapshot = await db.collection(app.mapping.users.collection ?? "users").get();
+  userSnapshot.forEach((doc) => {
+    userEnvironment.set(doc.id, doc.get("subscriptionDetails.environment"));
+  });
+
+  const parentEnvironment = new Map<string, unknown>();
+  const productByOriginalTxn = new Map<string, string>();
+  const parentSnapshot = await db.collection("appStoreNotificationV2").get();
+  parentSnapshot.forEach((doc) => {
+    productByOriginalTxn.set(doc.id, String(doc.get("productId") ?? ""));
+    parentEnvironment.set(doc.id, doc.get("environment"));
+  });
+
   // Dedup every Apple transaction once across all sources; prefer a record with a real price.
   const records = new Map<string, SavorySaleRecord>();
   const addRecord = (transactionId: string, record: SavorySaleRecord) => {
@@ -294,7 +475,13 @@ async function collectSavorySaleRecords(db: Firestore, app: AppConfig): Promise<
   const ledgerSnapshot = await db.collection("ledger").get();
   ledgerSnapshot.forEach((doc) => {
     const purchaseDetails = doc.get("purchaseDetails") as
-      | { transactionId?: string; productId?: string; price?: number | null }
+      | {
+          transactionId?: string;
+          originalTransactionId?: string;
+          productId?: string;
+          price?: number | null;
+          environment?: string | null;
+        }
       | undefined;
     if (!purchaseDetails) return;
     const productId = String(purchaseDetails.productId ?? "");
@@ -303,6 +490,13 @@ async function collectSavorySaleRecords(db: Firestore, app: AppConfig): Promise<
     if (!kind) return;
     const reason = String(doc.get("reason") ?? "");
     if ((kind === "monthly" || kind === "annual") && !SAVORY_SUBSCRIPTION_CHARGE_REASONS.has(reason)) return;
+    const originalTransactionId = String(purchaseDetails.originalTransactionId ?? "");
+    const environment =
+      purchaseDetails.environment ??
+      doc.get("environment") ??
+      parentEnvironment.get(originalTransactionId) ??
+      userEnvironment.get(String(doc.get("userId") ?? ""));
+    if (!isProductionEnvironment(environment)) return;
 
     const documentPrice = typeof purchaseDetails.price === "number" ? purchaseDetails.price : 0;
     const price = documentPrice > 0 ? documentPrice : savoryProductPrice(app, productId);
@@ -311,10 +505,6 @@ async function collectSavorySaleRecords(db: Firestore, app: AppConfig): Promise<
   });
 
   // 2. Apple App Store Server Notification events (renewals when webhooks are delivered).
-  const productByOriginalTxn = new Map<string, string>();
-  const parentSnapshot = await db.collection("appStoreNotificationV2").get();
-  parentSnapshot.forEach((doc) => productByOriginalTxn.set(doc.id, String(doc.get("productId") ?? "")));
-
   const eventsSnapshot = await db.collectionGroup("events").get();
   eventsSnapshot.forEach((doc) => {
     const eventType = String(doc.get("eventType") ?? "");
@@ -324,6 +514,7 @@ async function collectSavorySaleRecords(db: Firestore, app: AppConfig): Promise<
     if (!productId) return;
     const kind = savoryProductKind(app, productId);
     if (kind !== "monthly" && kind !== "annual") return;
+    if (!isProductionEnvironment(doc.get("environment"))) return;
     const priceValue = doc.get("price");
     const price = typeof priceValue === "number" && priceValue > 0 ? priceValue : savoryProductPrice(app, productId);
     const transactionId = String(doc.get("transactionId") ?? doc.id);
@@ -335,6 +526,12 @@ async function collectSavorySaleRecords(db: Firestore, app: AppConfig): Promise<
   iapSnapshot.forEach((doc) => {
     const productId = String(doc.get("productId") ?? "");
     if (savoryProductKind(app, productId) !== "consumable") return;
+    const originalTransactionId = String(doc.get("originalTransactionId") ?? "");
+    const environment =
+      doc.get("environment") ??
+      parentEnvironment.get(originalTransactionId) ??
+      userEnvironment.get(String(doc.get("userId") ?? ""));
+    if (!isProductionEnvironment(environment)) return;
     const transactionId = String(doc.get("storeTransactionId") ?? doc.id);
     addRecord(transactionId, { kind: "consumable", price: savoryProductPrice(app, productId), millis: millisFromValue(doc.get("createdAt")) });
   });
@@ -432,6 +629,7 @@ async function addDailyConsumableIapSales(db: Firestore, app: AppConfig, byDate:
     .get();
 
   snapshot.forEach((doc) => {
+    if (isExcludedPurchaseDoc(app, doc)) return;
     if (String(doc.get(app.mapping.purchases.productTypeField) ?? "") !== app.mapping.purchases.consumableValue) return;
 
     const date = dateKeyFromValue(doc.get(app.mapping.purchases.timestampField));
@@ -454,6 +652,7 @@ async function sumConsumableRevenue(db: Firestore, app: AppConfig, window: Windo
 
   let total = 0;
   snapshot.forEach((doc) => {
+    if (isExcludedPurchaseDoc(app, doc)) return;
     if (String(doc.get(productTypeField) ?? "") === consumableValue) {
       total += valueAsNumber(doc.get(amountField));
     }
@@ -466,6 +665,14 @@ async function sumSubscriptionSalesRevenue(db: Firestore, app: AppConfig, window
   const productIds = [...app.mapping.entitlements.monthlyProductIds, ...app.mapping.entitlements.annualProductIds];
   if (productIds.length === 0) return null;
 
+  if (app.key === "puzzle-canvas") {
+    const sales = await collectPuzzleSubscriptionSales(db, app);
+    const total = sales
+      .filter((sale) => sale.millis >= window.start.getTime() && sale.millis <= window.end.getTime())
+      .reduce((sum, sale) => sum + sale.price, 0);
+    return Math.round(total * 100) / 100;
+  }
+
   const { collection, timestampField, timestampType, amountField, productField } = app.mapping.purchases;
   const start = timestampType === "pacific-string" ? toPacificTimestampString(window.start) : Timestamp.fromDate(window.start);
   const end = timestampType === "pacific-string" ? toPacificTimestampString(window.end) : Timestamp.fromDate(window.end);
@@ -477,6 +684,7 @@ async function sumSubscriptionSalesRevenue(db: Firestore, app: AppConfig, window
 
   let total = 0;
   snapshot.forEach((doc) => {
+    if (isExcludedPurchaseDoc(app, doc)) return;
     const productId = String(doc.get(productField) ?? "");
     if (productIds.includes(productId)) {
       total += valueAsNumber(doc.get(amountField));
@@ -534,10 +742,16 @@ async function sumAccumulatedSalesRevenue(db: Firestore, app: AppConfig): Promis
   let total = 0;
 
   snapshot.forEach((doc) => {
+    if (isExcludedPurchaseDoc(app, doc)) return;
     const productId = String(doc.get(productField) ?? "");
     const purchaseKind = String(doc.get(productTypeField) ?? "");
     total += purchaseIapAmount(app, productId, purchaseKind, doc.get(amountField)) ?? 0;
   });
+
+  if (app.key === "puzzle-canvas") {
+    const subscriptionSales = await collectPuzzleSubscriptionSales(db, app);
+    total += subscriptionSales.reduce((sum, sale) => sum + sale.price, 0);
+  }
 
   return Math.round(total * 100) / 100;
 }
@@ -555,7 +769,7 @@ async function getDailyMetrics(db: Firestore, app: AppConfig): Promise<DailyMetr
   let onboardedTotal = 0;
   const userSnapshot = await db.collection(userCollection).get();
   userSnapshot.forEach((doc) => {
-    if (isSandboxUserDoc(app, doc)) return;
+    if (isExcludedUserDoc(app, doc)) return;
     const createdAt = dateKeyFromValue(doc.get(app.mapping.users.createdAtField));
     const lastSeenAt = dateKeyFromValue(doc.get(app.mapping.activity.timestampField));
     if (isOnboardedUserDoc(app, doc)) onboardedTotal += 1;
@@ -613,6 +827,7 @@ async function getDailyMetrics(db: Firestore, app: AppConfig): Promise<DailyMetr
     .get();
 
   purchaseSnapshot.forEach((doc) => {
+    if (isExcludedPurchaseDoc(app, doc)) return;
     const date = dateKeyFromValue(doc.get(app.mapping.purchases.timestampField));
     const point = date ? byDate.get(date) : null;
     if (!point) return;
@@ -636,6 +851,14 @@ async function getDailyMetrics(db: Firestore, app: AppConfig): Promise<DailyMetr
     }
   });
 
+  const subscriptionSales = await collectPuzzleSubscriptionSales(db, app);
+  for (const sale of subscriptionSales) {
+    const point = byDate.get(ptDateKey(new Date(sale.millis)));
+    if (!point) continue;
+    point.subscriptionSalesUsd = Math.round(((point.subscriptionSalesUsd ?? 0) + sale.price) * 100) / 100;
+    point.iapSalesUsd = Math.round(((point.iapSalesUsd ?? 0) + sale.price) * 100) / 100;
+  }
+
   return dailyMetrics;
 }
 
@@ -658,6 +881,7 @@ async function sumProductSalesRevenue(
 
   let total = 0;
   snapshot.forEach((doc) => {
+    if (isExcludedPurchaseDoc(app, doc)) return;
     const productId = String(doc.get(productField) ?? "");
     const purchaseKind = String(doc.get(productTypeField) ?? "");
     const matchesKind = product.purchaseKind ? purchaseKind === product.purchaseKind : purchaseKind === consumableValue;
@@ -691,6 +915,8 @@ export async function collectFirestoreMetrics(
   | "users"
   | "activeUsers"
   | "subscriptions"
+  | "episodeCompletionStats"
+  | "episodeCompletionDistribution"
   | "accumulatedSalesUsd"
   | "subscriptionSalesUsd"
   | "monthlySubscriptionSalesUsd"
@@ -702,6 +928,9 @@ export async function collectFirestoreMetrics(
 }> {
   const values = cloneEmptyValues();
   values.users.total = await countTotalUsers(db, app);
+  const episodeCompletionMetrics = await getEpisodeCompletionMetrics(db, app);
+  values.episodeCompletionStats = episodeCompletionMetrics.stats;
+  values.episodeCompletionDistribution = episodeCompletionMetrics.distribution;
   values.accumulatedSalesUsd.total = await sumAccumulatedSalesRevenue(db, app);
   values.dailyMetrics = await getDailyMetrics(db, app);
   const activeEntries = await Promise.all(
@@ -761,6 +990,8 @@ export async function collectFirestoreMetrics(
     users: values.users,
     activeUsers: values.activeUsers,
     subscriptions: values.subscriptions,
+    episodeCompletionStats: values.episodeCompletionStats,
+    episodeCompletionDistribution: values.episodeCompletionDistribution,
     accumulatedSalesUsd: values.accumulatedSalesUsd,
     subscriptionSalesUsd: values.subscriptionSalesUsd,
     monthlySubscriptionSalesUsd: values.monthlySubscriptionSalesUsd,

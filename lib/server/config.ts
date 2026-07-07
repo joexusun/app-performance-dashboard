@@ -14,6 +14,7 @@ export type FirestoreMapping = {
     sandboxValue: string | boolean | null;
     onboardedField: string | null;
     onboardedValue: string | boolean;
+    totalEpisodesCompletedField: string | null;
   };
   activity: {
     collection: string;
@@ -63,6 +64,7 @@ export type AppConfig = {
   // Optional per-product overrides ("id:price,id:price"). Takes precedence over
   // the term prices above — needed when grandfathered products renew at old prices.
   productPricesUsd: Record<string, number>;
+  ga4PropertyId: string | null;
   firebase: FirebaseCredentials | null;
   mapping: FirestoreMapping;
   productSales: ProductSalesConfig[];
@@ -90,7 +92,7 @@ export type DashboardConfig = {
 };
 
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
-const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
 function readEnv(name: string): string | null {
   let value = process.env[name]?.trim();
@@ -223,6 +225,7 @@ function app(prefix: string, key: AppKey, displayName: string): AppConfig {
     monthlyPriceUsd: readNumber(`${prefix}_MONTHLY_PRICE_USD`),
     annualPriceUsd: readNumber(`${prefix}_ANNUAL_PRICE_USD`),
     productPricesUsd: readProductPrices(`${prefix}_PRODUCT_PRICES_USD`),
+    ga4PropertyId: readEnv(`${prefix}_GA4_PROPERTY_ID`),
     firebase: readFirebase(prefix),
     mapping: {
       users: {
@@ -231,7 +234,9 @@ function app(prefix: string, key: AppKey, displayName: string): AppConfig {
         sandboxField: readEnv(`${prefix}_USER_SANDBOX_FIELD`),
         sandboxValue: readOptionalBooleanish(`${prefix}_USER_SANDBOX_VALUE`),
         onboardedField: readEnv(`${prefix}_USER_ONBOARDED_FIELD`) ?? (key === "puzzle-canvas" ? "tutorialPassed" : null),
-        onboardedValue: readBooleanish(`${prefix}_USER_ONBOARDED_VALUE`, true)
+        onboardedValue: readBooleanish(`${prefix}_USER_ONBOARDED_VALUE`, true),
+        totalEpisodesCompletedField:
+          readEnv(`${prefix}_USER_TOTAL_EPISODES_COMPLETED_FIELD`) ?? (key === "puzzle-canvas" ? "totalEpisodesCompleted" : null)
       },
       activity: {
         collection: readEnv(`${prefix}_ACTIVITY_COLLECTION`) ?? "userActivity",
@@ -267,7 +272,7 @@ export function getDashboardConfig(): DashboardConfig {
   return {
     authSecret: readEnv("AUTH_SECRET") ?? "local-development-secret",
     allowedPhoneNumbers: readCsv("DASHBOARD_ALLOWED_PHONE_NUMBERS"),
-    refreshIntervalMs: TWELVE_HOURS_MS,
+    refreshIntervalMs: TWO_HOURS_MS,
     timezone: DEFAULT_TIMEZONE,
     dashboardFirebase: readFirebase("DASHBOARD"),
     appStore: {

@@ -77,6 +77,11 @@ export function mergeValues(values: Partial<MetricValues>): MetricValues {
     downloads: { ...merged.downloads, ...values.downloads },
     activeUsers: { ...merged.activeUsers, ...values.activeUsers },
     subscriptions: { ...merged.subscriptions, ...values.subscriptions },
+    episodeCompletionStats: { ...merged.episodeCompletionStats, ...values.episodeCompletionStats },
+    episodeCompletionDistribution:
+      values.episodeCompletionDistribution ?? merged.episodeCompletionDistribution,
+    retention: { ...merged.retention, ...values.retention },
+    retentionCurve: values.retentionCurve ?? merged.retentionCurve,
     accumulatedSalesUsd: { ...merged.accumulatedSalesUsd, ...values.accumulatedSalesUsd },
     accumulatedAdsEarningsUsd: { ...merged.accumulatedAdsEarningsUsd, ...values.accumulatedAdsEarningsUsd },
     subscriptionSalesUsd: { ...merged.subscriptionSalesUsd, ...values.subscriptionSalesUsd },
@@ -232,6 +237,25 @@ export async function writeLatestSnapshot(db: Firestore, metrics: AppMetrics[]):
 
   for (const metric of metrics) {
     const dashboardRef = db.collection(appCollection(metric.appKey)).doc(DASHBOARD_DOC_ID);
+    const mergedDailyPoints: DailyMetricPoint[] = [];
+
+    for (const point of metric.values.dailyMetrics) {
+      const dailyRef = dashboardRef.collection("dailyMetrics").doc(point.date);
+      const existing = await dailyRef.get();
+      const incoming = dailyDocFromPoint(metric, point, generatedAt, runId);
+      const mergedDailyDoc = mergeHistoricalDoc(existing.data() ?? {}, incoming, generatedAt);
+      mergedDailyPoints.push(mergedDailyDoc as DailyMetricPoint);
+      batch.set(dailyRef, mergedDailyDoc, { merge: false });
+    }
+
+    const summaryMetric: AppMetrics = {
+      ...metric,
+      values: {
+        ...metric.values,
+        dailyMetrics: mergeDailyMetrics(metric.values.dailyMetrics, mergedDailyPoints)
+      }
+    };
+
     batch.set(
       dashboardRef,
       {
@@ -241,17 +265,10 @@ export async function writeLatestSnapshot(db: Firestore, metrics: AppMetrics[]):
         timezone: metric.timezone,
         latestGeneratedAt: metric.generatedAt,
         sourceStatuses: metric.sourceStatuses,
-        summary: metric
+        summary: summaryMetric
       },
       { merge: false }
     );
-
-    for (const point of metric.values.dailyMetrics) {
-      const dailyRef = dashboardRef.collection("dailyMetrics").doc(point.date);
-      const existing = await dailyRef.get();
-      const incoming = dailyDocFromPoint(metric, point, generatedAt, runId);
-      batch.set(dailyRef, mergeHistoricalDoc(existing.data() ?? {}, incoming, generatedAt), { merge: false });
-    }
 
     batch.set(
       dashboardRef.collection("refreshRuns").doc(runId),
@@ -266,7 +283,7 @@ export async function writeLatestSnapshot(db: Firestore, metrics: AppMetrics[]):
       { merge: false }
     );
 
-    batch.set(rootRef.collection("apps").doc(metric.appKey), metric, { merge: false });
+    batch.set(rootRef.collection("apps").doc(metric.appKey), summaryMetric, { merge: false });
   }
 
   await batch.commit();
