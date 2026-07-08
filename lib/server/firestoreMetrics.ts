@@ -347,6 +347,19 @@ async function collectPuzzleSubscriptionSales(db: Firestore, app: AppConfig): Pr
   return sales;
 }
 
+// A SUBSCRIBED event whose entitlement window is only a few days is a free-trial
+// start — Apple sends it when the trial begins, before any charge. The paid
+// conversion arrives later as DID_RENEW with a full-term window, and is booked
+// then. No real subscription term is anywhere near this short (monthly ≈ 30d).
+const TRIAL_WINDOW_MAX_MS = 8 * 24 * 60 * 60 * 1000;
+
+function isReceiptCamTrialStartEvent(doc: FirebaseFirestore.QueryDocumentSnapshot): boolean {
+  const signed = millisFromValue(doc.get("signedDate"));
+  const expires = Number(doc.get("expiresDateMs"));
+  if (signed === null || !Number.isFinite(expires) || expires <= 0) return false;
+  return expires - signed <= TRIAL_WINDOW_MAX_MS;
+}
+
 async function sumReceiptCamAccumulatedSalesRevenue(db: Firestore, app: AppConfig): Promise<number> {
   const productIds = [...app.mapping.entitlements.monthlyProductIds, ...app.mapping.entitlements.annualProductIds];
   if (productIds.length === 0) return 0;
@@ -364,6 +377,7 @@ async function sumReceiptCamAccumulatedSalesRevenue(db: Firestore, app: AppConfi
 
     const notificationType = String(doc.get("notificationType") ?? "");
     if (!["SUBSCRIBED", "DID_RENEW", "DID_RECOVER"].includes(notificationType)) return;
+    if (notificationType === "SUBSCRIBED" && isReceiptCamTrialStartEvent(doc)) return;
 
     const transactionId = String(doc.get("transactionId") ?? doc.id);
     if (!transactionId || transactionIds.has(transactionId)) return;
@@ -403,6 +417,7 @@ async function sumReceiptCamSubscriptionSalesByTerm(
 
     const notificationType = String(doc.get("notificationType") ?? "");
     if (!["SUBSCRIBED", "DID_RENEW", "DID_RECOVER"].includes(notificationType)) return;
+    if (notificationType === "SUBSCRIBED" && isReceiptCamTrialStartEvent(doc)) return;
 
     const transactionId = String(doc.get("transactionId") ?? doc.id);
     if (!transactionId || transactionIds.has(transactionId)) return;
@@ -603,6 +618,7 @@ async function addReceiptCamDailyIapSales(db: Firestore, app: AppConfig, byDate:
 
     const notificationType = String(doc.get("notificationType") ?? "");
     if (!["SUBSCRIBED", "DID_RENEW", "DID_RECOVER"].includes(notificationType)) return;
+    if (notificationType === "SUBSCRIBED" && isReceiptCamTrialStartEvent(doc)) return;
 
     const transactionId = String(doc.get("transactionId") ?? doc.id);
     if (!transactionId || transactionIds.has(transactionId)) return;
