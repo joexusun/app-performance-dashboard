@@ -23,6 +23,7 @@ export type DailyMetricPoint = {
   assistRefillNonMemberSalesUsd?: number | null;
   adsEarningsUsd?: number | null;
   adsEcpmUsd?: number | null;
+  metaSpendUsd?: number | null;
 };
 
 export type DailyMetricValueKey = Exclude<keyof DailyMetricPoint, "date">;
@@ -76,6 +77,14 @@ export type MetricValues = {
   adsEarningsUsd: Record<MetricWindow, number | null>;
   adsEcpmUsd: Record<MetricWindow, number | null>;
   consumableRevenueUsd: Record<MetricWindow, number | null>;
+  accumulatedMetaSpendUsd: {
+    total: number | null;
+  };
+  accumulatedMetaInstalls: {
+    total: number | null;
+  };
+  metaSpendUsd: Record<MetricWindow, number | null>;
+  metaInstalls: Record<MetricWindow, number | null>;
   dailyMetrics: DailyMetricPoint[];
 };
 
@@ -95,6 +104,7 @@ export type AppMetrics = {
     appStore: SourceStatus;
     ads: SourceStatus;
     analytics?: SourceStatus;
+    metaAds?: SourceStatus;
     snapshot: SourceStatus;
   };
   generatedAt: string | null;
@@ -174,6 +184,22 @@ export const EMPTY_VALUES: MetricValues = {
     thirtyDays: null
   },
   consumableRevenueUsd: {
+    today: null,
+    sevenDays: null,
+    thirtyDays: null
+  },
+  accumulatedMetaSpendUsd: {
+    total: null
+  },
+  accumulatedMetaInstalls: {
+    total: null
+  },
+  metaSpendUsd: {
+    today: null,
+    sevenDays: null,
+    thirtyDays: null
+  },
+  metaInstalls: {
     today: null,
     sevenDays: null,
     thirtyDays: null

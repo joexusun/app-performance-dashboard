@@ -6,6 +6,7 @@ import { getDb } from "@/lib/server/firebaseAdmin";
 import { collectFirestoreMetrics } from "@/lib/server/firestoreMetrics";
 import { fetchFirstTimeDownloads } from "@/lib/server/appStore";
 import { collectAdMobMetrics } from "@/lib/server/adMob";
+import { collectMetaAdsMetrics } from "@/lib/server/metaAds";
 import { collectGoogleAnalyticsRetention } from "@/lib/server/googleAnalytics";
 import { mergeValues, readLatestSnapshots, sumMetricValues, writeLatestSnapshot } from "@/lib/server/snapshots";
 
@@ -40,6 +41,7 @@ function emptyAppMetrics(app: AppConfig, message: string): AppMetrics {
       appStore: status(false, message),
       ads: status(false, message),
       analytics: status(false, message),
+      metaAds: status(false, message),
       snapshot: status(false, "No snapshot available.")
     },
     generatedAt: null,
@@ -70,6 +72,7 @@ async function collectAppMetrics(app: AppConfig): Promise<AppMetrics> {
       : status(false, "App Store Connect credentials are missing.");
   let adsStatus = status(false, "AdMob is not configured for this app.");
   let analyticsStatus = status(false, "Google Analytics is not configured for this app.");
+  let metaAdsStatus = status(false, "Meta Ads is not configured for this app.");
 
   if (app.firebase) {
     try {
@@ -102,6 +105,19 @@ async function collectAppMetrics(app: AppConfig): Promise<AppMetrics> {
     }
   }
 
+  if (app.metaAdAccountId && config.metaAds.accessToken) {
+    try {
+      const metaAdsValues = await collectMetaAdsMetrics(config, app);
+      Object.assign(
+        values,
+        mergeValues({ ...values, ...metaAdsValues, dailyMetrics: [...values.dailyMetrics, ...metaAdsValues.dailyMetrics] })
+      );
+      metaAdsStatus = status(true, "Meta Ads metrics collected.");
+    } catch (error) {
+      metaAdsStatus = status(false, error instanceof Error ? error.message : "Meta Ads collection failed.");
+    }
+  }
+
   if (app.key === "puzzle-canvas" && app.ga4PropertyId) {
     try {
       const analyticsValues = await collectGoogleAnalyticsRetention(app);
@@ -123,6 +139,7 @@ async function collectAppMetrics(app: AppConfig): Promise<AppMetrics> {
       appStore: appStoreStatus,
       ads: adsStatus,
       analytics: analyticsStatus,
+      metaAds: metaAdsStatus,
       snapshot: status(true, "Snapshot generated.")
     },
     generatedAt: new Date().toISOString(),
@@ -219,6 +236,13 @@ export async function refreshMetrics(previousApps?: AppMetrics[]): Promise<Refre
       values.adsEcpmUsd = previous.values.adsEcpmUsd;
       values.dailyMetrics = mergedDailyMetrics;
     }
+    if (!metric.sourceStatuses.metaAds?.ok) {
+      values.accumulatedMetaSpendUsd = previous.values.accumulatedMetaSpendUsd ?? values.accumulatedMetaSpendUsd;
+      values.accumulatedMetaInstalls = previous.values.accumulatedMetaInstalls ?? values.accumulatedMetaInstalls;
+      values.metaSpendUsd = previous.values.metaSpendUsd ?? values.metaSpendUsd;
+      values.metaInstalls = previous.values.metaInstalls ?? values.metaInstalls;
+      values.dailyMetrics = mergedDailyMetrics;
+    }
     const previousRetention = previous.values.retention;
     const previousRetentionCurve = previous.values.retentionCurve;
     const hasPreviousRetention =
@@ -238,6 +262,7 @@ export async function refreshMetrics(previousApps?: AppMetrics[]): Promise<Refre
       !metric.sourceStatuses.firestore.ok ||
       !metric.sourceStatuses.appStore.ok ||
       !metric.sourceStatuses.ads?.ok ||
+      !metric.sourceStatuses.metaAds?.ok ||
       analyticsUnavailable;
     return {
       ...metric,

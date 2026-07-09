@@ -65,6 +65,8 @@ export type AppConfig = {
   // the term prices above — needed when grandfathered products renew at old prices.
   productPricesUsd: Record<string, number>;
   ga4PropertyId: string | null;
+  // Meta ad account for this app's campaigns (format "act_<id>").
+  metaAdAccountId: string | null;
   firebase: FirebaseCredentials | null;
   // Where the `feedback` collection lives, when not in the main Firebase project
   // (e.g. Puzzle Canvas feedback ships staging-first). Same service account, so the
@@ -91,6 +93,11 @@ export type DashboardConfig = {
     clientSecret: string | null;
     refreshToken: string | null;
     publisherAccount: string | null;
+  };
+  metaAds: {
+    // System-user token preferred (never expires); falls back to a user token.
+    accessToken: string | null;
+    appSecret: string | null;
   };
   apps: AppConfig[];
 };
@@ -232,6 +239,7 @@ function app(prefix: string, key: AppKey, displayName: string): AppConfig {
     annualPriceUsd: readNumber(`${prefix}_ANNUAL_PRICE_USD`),
     productPricesUsd: readProductPrices(`${prefix}_PRODUCT_PRICES_USD`),
     ga4PropertyId: readEnv(`${prefix}_GA4_PROPERTY_ID`),
+    metaAdAccountId: readEnv(`${prefix}_META_AD_ACCOUNT_ID`),
     firebase,
     feedbackFirebase: feedbackProjectId && firebase ? { ...firebase, projectId: feedbackProjectId } : null,
     mapping: {
@@ -293,6 +301,10 @@ export function getDashboardConfig(): DashboardConfig {
       clientSecret: readEnv("GOOGLE_ADMOB_CLIENT_SECRET"),
       refreshToken: readEnv("GOOGLE_ADMOB_REFRESH_TOKEN"),
       publisherAccount: readEnv("GOOGLE_ADMOB_PUBLISHER_ACCOUNT")
+    },
+    metaAds: {
+      accessToken: readEnv("META_SYSTEM_USER_TOKEN") ?? readEnv("META_ACCESS_TOKEN"),
+      appSecret: readEnv("META_APP_SECRET")
     },
     apps: [
       app("PUZZLE_CANVAS", "puzzle-canvas", "Puzzle Canvas"),

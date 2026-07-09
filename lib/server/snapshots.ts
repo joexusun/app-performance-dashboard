@@ -24,7 +24,8 @@ const DAILY_FIELDS: DailyMetricValueKey[] = [
   "assistRefillMemberSalesUsd",
   "assistRefillNonMemberSalesUsd",
   "adsEarningsUsd",
-  "adsEcpmUsd"
+  "adsEcpmUsd",
+  "metaSpendUsd"
 ];
 
 function cloneEmptyValues(): MetricValues {
@@ -46,7 +47,8 @@ function dailyPointBase(date: string): DailyMetricPoint {
     assistRefillMemberSalesUsd: null,
     assistRefillNonMemberSalesUsd: null,
     adsEarningsUsd: null,
-    adsEcpmUsd: null
+    adsEcpmUsd: null,
+    metaSpendUsd: null
   };
 }
 
@@ -90,6 +92,10 @@ export function mergeValues(values: Partial<MetricValues>): MetricValues {
     adsEarningsUsd: { ...merged.adsEarningsUsd, ...values.adsEarningsUsd },
     adsEcpmUsd: { ...merged.adsEcpmUsd, ...values.adsEcpmUsd },
     consumableRevenueUsd: { ...merged.consumableRevenueUsd, ...values.consumableRevenueUsd },
+    accumulatedMetaSpendUsd: { ...merged.accumulatedMetaSpendUsd, ...values.accumulatedMetaSpendUsd },
+    accumulatedMetaInstalls: { ...merged.accumulatedMetaInstalls, ...values.accumulatedMetaInstalls },
+    metaSpendUsd: { ...merged.metaSpendUsd, ...values.metaSpendUsd },
+    metaInstalls: { ...merged.metaInstalls, ...values.metaInstalls },
     dailyMetrics: mergeDailyMetrics(values.dailyMetrics)
   };
 }
@@ -110,7 +116,8 @@ function appSpecificDailyFields(appKey: AppKey): DailyMetricValueKey[] {
       "goldPackSalesUsd",
       "newCanvasSalesUsd",
       "adsEarningsUsd",
-      "adsEcpmUsd"
+      "adsEcpmUsd",
+      "metaSpendUsd"
     ];
   }
 
@@ -122,11 +129,12 @@ function appSpecificDailyFields(appKey: AppKey): DailyMetricValueKey[] {
       "activeUsers",
       "iapSalesUsd",
       "assistRefillMemberSalesUsd",
-      "assistRefillNonMemberSalesUsd"
+      "assistRefillNonMemberSalesUsd",
+      "metaSpendUsd"
     ];
   }
 
-  return ["users", "downloads", "subscribers", "activeUsers", "iapSalesUsd"];
+  return ["users", "downloads", "subscribers", "activeUsers", "iapSalesUsd", "metaSpendUsd"];
 }
 
 function dailyDocFromPoint(metric: AppMetrics, point: DailyMetricPoint, generatedAt: string, runId: string): Record<string, unknown> {
@@ -340,6 +348,15 @@ export function sumMetricValues(apps: AppMetrics[]): MetricValues {
     totals.consumableRevenueUsd.thirtyDays =
       Math.round(((totals.consumableRevenueUsd.thirtyDays ?? 0) + (app.values.consumableRevenueUsd.thirtyDays ?? 0)) * 100) /
       100;
+    totals.accumulatedMetaSpendUsd.total =
+      Math.round(((totals.accumulatedMetaSpendUsd.total ?? 0) + (app.values.accumulatedMetaSpendUsd?.total ?? 0)) * 100) / 100;
+    totals.accumulatedMetaInstalls.total =
+      (totals.accumulatedMetaInstalls.total ?? 0) + (app.values.accumulatedMetaInstalls?.total ?? 0);
+    for (const window of ["today", "sevenDays", "thirtyDays"] as const) {
+      totals.metaSpendUsd[window] =
+        Math.round(((totals.metaSpendUsd[window] ?? 0) + (app.values.metaSpendUsd?.[window] ?? 0)) * 100) / 100;
+      totals.metaInstalls[window] = (totals.metaInstalls[window] ?? 0) + (app.values.metaInstalls?.[window] ?? 0);
+    }
     totals.dailyMetrics = mergeDailyMetrics(totals.dailyMetrics, app.values.dailyMetrics);
   }
   return totals;

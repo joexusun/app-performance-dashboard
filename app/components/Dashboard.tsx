@@ -172,6 +172,7 @@ function chartData(points: DailyMetricPoint[]): ChartPoint[] {
     onboardedUsers: point.onboardedUsers ?? null,
     iapSalesUsd: point.iapSalesUsd ?? 0,
     adsEarningsUsd: point.adsEarningsUsd ?? 0,
+    metaSpendUsd: point.metaSpendUsd ?? 0,
     dateLabel: shortDate(point.date)
   }));
 }
@@ -411,6 +412,26 @@ function RevenueChart({ points }: { points: DailyMetricPoint[] }) {
   );
 }
 
+function MetaSpendChart({ points }: { points: DailyMetricPoint[] }) {
+  const data = chartData(points);
+
+  return (
+    <ChartShell title="Meta Ad Spend">
+      <div className="chartBox">
+        <ResponsiveContainer height="100%" width="100%">
+          <BarChart data={data} margin={{ bottom: 0, left: -22, right: 8, top: 8 }}>
+            <CartesianGrid stroke="#d9ded9" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="dateLabel" interval="preserveStartEnd" minTickGap={24} tickLine={false} />
+            <YAxis tickFormatter={(value: number) => `$${value}`} tickLine={false} width={44} />
+            <Tooltip content={<ChartTooltip />} />
+            <Bar dataKey="metaSpendUsd" fill="#1877f2" name="Meta Ad Spend" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </ChartShell>
+  );
+}
+
 function PuzzleCharts({ app }: { app: AppMetrics }) {
   const points = app.values.dailyMetrics ?? [];
   if (points.length === 0) return null;
@@ -422,6 +443,7 @@ function PuzzleCharts({ app }: { app: AppMetrics }) {
       <OnboardedUsersChart points={points} />
       <EpisodeCompletionDistributionChart points={app.values.episodeCompletionDistribution ?? []} />
       <RevenueChart points={points} />
+      <MetaSpendChart points={points} />
     </div>
   );
 }
@@ -434,6 +456,7 @@ function ReceiptCharts({ app }: { app: AppMetrics }) {
     <div className="chartStack">
       <UsersSubscribersChart points={points} />
       <IapSalesChart points={points} />
+      <MetaSpendChart points={points} />
     </div>
   );
 }
@@ -446,6 +469,7 @@ function SavoryCharts({ app }: { app: AppMetrics }) {
     <div className="chartStack">
       <UsersSubscribersChart points={points} />
       <IapSalesChart points={points} />
+      <MetaSpendChart points={points} />
     </div>
   );
 }
@@ -460,6 +484,13 @@ function AppPanel({ app }: { app: AppMetrics }) {
   const usesAppStore = !app.sourceStatuses.appStore.message.toLowerCase().includes("not used");
   const usesAds = app.sourceStatuses.ads?.ok || app.values.accumulatedAdsEarningsUsd?.total !== null;
   const usesAnalytics = app.appKey === "puzzle-canvas";
+  const usesMetaAds = Boolean(app.sourceStatuses.metaAds?.ok) || (app.values.accumulatedMetaSpendUsd?.total ?? null) !== null;
+  const metaLifetimeSpend = app.values.accumulatedMetaSpendUsd?.total ?? null;
+  const metaLifetimeInstalls = app.values.accumulatedMetaInstalls?.total ?? null;
+  const metaLifetimeCpi =
+    metaLifetimeSpend !== null && metaLifetimeInstalls !== null && metaLifetimeInstalls > 0
+      ? Math.round((metaLifetimeSpend / metaLifetimeInstalls) * 100) / 100
+      : null;
 
   return (
     <article className="appPanel">
@@ -473,6 +504,7 @@ function AppPanel({ app }: { app: AppMetrics }) {
           {usesAppStore ? <StatusPill ok={app.sourceStatuses.appStore.ok} label="App Store" /> : null}
           {usesAds ? <StatusPill ok={Boolean(app.sourceStatuses.ads?.ok)} label="AdMob" /> : null}
           {usesAnalytics ? <StatusPill ok={Boolean(app.sourceStatuses.analytics?.ok)} label="Analytics" /> : null}
+          {usesMetaAds ? <StatusPill ok={Boolean(app.sourceStatuses.metaAds?.ok)} label="Meta Ads" /> : null}
         </div>
       </header>
 
@@ -494,6 +526,21 @@ function AppPanel({ app }: { app: AppMetrics }) {
             <span>Accumulated Ads Earnings</span>
             <strong>{currencyValue(app.values.accumulatedAdsEarningsUsd?.total ?? null)}</strong>
           </div>
+        ) : null}
+        {usesMetaAds ? (
+          <>
+            <div className="metricRow">
+              <span>Accumulated Meta Ad Spend</span>
+              <strong>{currencyValue(metaLifetimeSpend)}</strong>
+            </div>
+            <div className="metricRow">
+              <span>Meta Installs (lifetime / CPI)</span>
+              <strong>
+                {numberValue(metaLifetimeInstalls)}
+                {metaLifetimeCpi !== null ? ` / ${currencyValue(metaLifetimeCpi)}` : ""}
+              </strong>
+            </div>
+          </>
         ) : null}
       </div>
 
@@ -544,6 +591,18 @@ function AppPanel({ app }: { app: AppMetrics }) {
                     <small>{sale.label}</small>
                   </div>
                 ))}
+            {usesMetaAds ? (
+              <>
+                <div className="productSale">
+                  <strong>{currencyValue(app.values.metaSpendUsd?.[window.key] ?? null)}</strong>
+                  <small>Meta Ad Spend</small>
+                </div>
+                <div className="productSale">
+                  <strong>{numberValue(app.values.metaInstalls?.[window.key] ?? null)}</strong>
+                  <small>Meta Installs</small>
+                </div>
+              </>
+            ) : null}
           </div>
         ))}
       </div>
