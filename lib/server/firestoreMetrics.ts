@@ -786,7 +786,10 @@ async function getDailyMetrics(db: Firestore, app: AppConfig): Promise<DailyMetr
   const userSnapshot = await db.collection(userCollection).get();
   userSnapshot.forEach((doc) => {
     if (isExcludedUserDoc(app, doc)) return;
-    const createdAt = dateKeyFromValue(doc.get(app.mapping.users.createdAtField));
+    // Fall back to the document's own creation time when the app never writes a
+    // created-at field (e.g. Savory Advisor) — otherwise a user with no createdAt
+    // counts toward every chart day and the Users line flattens at the total.
+    const createdAt = dateKeyFromValue(doc.get(app.mapping.users.createdAtField)) ?? dateKeyFromValue(doc.createTime);
     const lastSeenAt = dateKeyFromValue(doc.get(app.mapping.activity.timestampField));
     if (isOnboardedUserDoc(app, doc)) onboardedTotal += 1;
     const productId = String(doc.get(app.mapping.entitlements.productField) ?? "");
